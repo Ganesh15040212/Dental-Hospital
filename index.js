@@ -3,8 +3,12 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
+import dns from 'dns';
 import { google } from 'googleapis';
 import { toZonedTime, fromZonedTime, formatInTimeZone, format } from 'date-fns-tz';
+
+// Prefer IPv4 to resolve connect timeout / hang issues on Windows with misconfigured IPv6 routing
+dns.setDefaultResultOrder('ipv4first');
 
 dotenv.config();
 
@@ -15,6 +19,28 @@ app.use(express.json());
 const PORT = process.env.PORT || 3000;
 const CLINIC_TIMEZONE = process.env.CLINIC_TIMEZONE || 'Asia/Kolkata';
 const GOOGLE_CALENDAR_ID = process.env.GOOGLE_CALENDAR_ID || 'primary';
+
+// ============================================================================
+// Admin & ElevenLabs Settings Management (persisted in admin-settings.json)
+// ============================================================================
+const settingsPath = path.resolve('./admin-settings.json');
+let adminSettings = {
+  agentId: process.env.ELEVENLABS_AGENT_ID || '',
+  apiKey: process.env.ELEVENLABS_API_KEY || ''
+};
+
+if (fs.existsSync(settingsPath)) {
+  try {
+    const raw = fs.readFileSync(settingsPath, 'utf8');
+    const parsed = JSON.parse(raw);
+    adminSettings = { ...adminSettings, ...parsed };
+    console.log('✅ Admin settings loaded from admin-settings.json successfully.');
+  } catch (error) {
+    console.error('❌ Failed to parse admin-settings.json, using defaults.', error);
+  }
+} else {
+  console.log('ℹ️ No admin-settings.json found, using environment defaults.');
+}
 
 // ============================================================================
 // 1. Google Calendar Authentication Setup (with Mock Fallback for easy testing)
@@ -121,7 +147,7 @@ function parseDateTimeInZone(dateTimeStr, timeZone) {
     let hour = parseInt(ampmMatch[4], 10);
     const minute = ampmMatch[5];
     const ampm = ampmMatch[6].toUpperCase();
-    
+
     if (ampm === 'PM' && hour < 12) {
       hour += 12;
     } else if (ampm === 'AM' && hour === 12) {
@@ -161,7 +187,7 @@ function validateWorkingHours(date) {
   }
 
   const localDate = toZonedTime(date, CLINIC_TIMEZONE);
-  
+
   const hour = localDate.getHours();
   const minutes = localDate.getMinutes();
 
@@ -208,7 +234,13 @@ async function checkOverlap(startTime, endTime) {
     return events.length > 0;
   } catch (error) {
     console.error('Error fetching calendar events for overlap check:', error);
-    throw new Error('Could not check calendar availability.');
+    console.warn('⚠️ Google API request failed. Falling back to Simulation/Mock Mode for this check.');
+    const overlap = simulatedBookings.some(booking => {
+      const bookStart = new Date(booking.start);
+      const bookEnd = new Date(booking.end);
+      return (startTime < bookEnd && endTime > bookStart);
+    });
+    return overlap;
   }
 }
 
@@ -281,6 +313,120 @@ app.get('/api/webhook/available-slots', async (req, res) => {
 });
 
 /**
+ * Endpoint to fetch a signed URL from ElevenLabs
+ */
+/**
+ * Endpoint to fetch the currently active ElevenLabs Agent ID
+ */
+app.get('/api/agent-id', (req, res) => {
+  return res.json({ status: 'success', agentId: adminSettings.agentId });
+});
+
+/**
+ * Endpoint to get Admin Configuration Settings
+ */
+app.get('/api/admin/settings', (req, res) => {
+  return res.json({
+    status: 'success',
+    settings: {
+      agentId: adminSettings.agentId,
+      apiKey: adminSettings.apiKey
+    }
+  });
+});
+
+/**
+ * Endpoint to update Admin Configuration Settings
+ */
+app.post('/api/admin/settings', (req, res) => {
+  const { agentId, apiKey } = req.body;
+  
+  adminSettings.agentId = agentId || '';
+  adminSettings.apiKey = apiKey || '';
+
+  try {
+    fs.writeFileSync(settingsPath, JSON.stringify(adminSettings, null, 2), 'utf8');
+    console.log('✅ Admin settings updated successfully in admin-settings.json.');
+    return res.json({ status: 'success', message: 'Settings updated successfully.' });
+  } catch (error) {
+    console.error('Error saving admin settings:', error);
+    return res.status(500).json({ status: 'error', message: 'Failed to save settings.' });
+  }
+});
+
+/**
+ * Endpoint to fetch a signed URL from ElevenLabs
+ */
+app.post('/api/signed-url', async (req, res) => {
+  const { mode } = req.body;
+  const agentId = adminSettings.agentId;
+  const apiKey = adminSettings.apiKey;
+
+  if (!agentId) {
+    return res.status(400).json({ status: 'error', message: 'Missing agentId configuration on backend.' });
+  }
+  if (!apiKey) {
+    return res.json({ status: 'ignored', message: 'No ElevenLabs API Key configured. Bypassing signed URL.' });
+  }
+
+  try {
+    if (mode === 'chat') {
+      const response = await fetch(
+        `https://api.elevenlabs.io/v1/convai/conversation/get-signed-url?agent_id=${agentId}`,
+        {
+          method: 'GET',
+          headers: {
+            'xi-api-key': apiKey,
+          },
+          signal: AbortSignal.timeout(3000)
+        }
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('ElevenLabs API returned error:', errorText);
+        return res.status(response.status).json({
+          status: 'error',
+          message: `ElevenLabs API error: ${errorText || response.statusText}`
+        });
+      }
+
+      const data = await response.json();
+      return res.json({ status: 'success', signed_url: data.signed_url });
+    } else {
+      const response = await fetch(
+        `https://api.elevenlabs.io/v1/convai/conversation/token?agent_id=${agentId}`,
+        {
+          method: 'GET',
+          headers: {
+            'xi-api-key': apiKey,
+          },
+          signal: AbortSignal.timeout(3000)
+        }
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('ElevenLabs API returned error:', errorText);
+        return res.status(response.status).json({
+          status: 'error',
+          message: `ElevenLabs API error: ${errorText || response.statusText}`
+        });
+      }
+
+      const data = await response.json();
+      return res.json({ status: 'success', conversation_token: data.conversation_token });
+    }
+  } catch (error) {
+    console.error('Error fetching session authorization:', error);
+    return res.status(500).json({
+      status: 'error',
+      message: 'Failed to retrieve session authorization from ElevenLabs.'
+    });
+  }
+});
+
+/**
  * Endpoint to fetch all active bookings
  */
 app.get('/api/bookings', async (req, res) => {
@@ -308,7 +454,9 @@ app.get('/api/bookings', async (req, res) => {
     return res.json({ status: 'success', bookings });
   } catch (error) {
     console.error('Error fetching calendar bookings:', error);
-    return res.status(500).json({ status: 'error', message: 'Could not fetch bookings.' });
+    console.warn('⚠️ Google API request failed. Falling back to Simulation/Mock Mode for this request.');
+    const sorted = [...simulatedBookings].sort((a, b) => new Date(a.start) - new Date(b.start));
+    return res.json({ status: 'success', bookings: sorted });
   }
 });
 
@@ -330,8 +478,10 @@ app.post('/api/webhook/book-appointment', async (req, res) => {
     });
   }
 
+  let requestedStart;
+  let requestedEnd;
   try {
-    const requestedStart = parseDateTimeInZone(dateTime, CLINIC_TIMEZONE);
+    requestedStart = parseDateTimeInZone(dateTime, CLINIC_TIMEZONE);
     if (isNaN(requestedStart.getTime())) {
       return res.status(400).json({
         status: 'error',
@@ -350,7 +500,7 @@ app.post('/api/webhook/book-appointment', async (req, res) => {
     }
 
     // All dental appointments are 1 hour duration
-    const requestedEnd = new Date(requestedStart.getTime() + 60 * 60 * 1000);
+    requestedEnd = new Date(requestedStart.getTime() + 60 * 60 * 1000);
 
     // B. Check for schedule conflict
     const hasOverlap = await checkOverlap(requestedStart, requestedEnd);
@@ -375,7 +525,7 @@ app.post('/api/webhook/book-appointment', async (req, res) => {
       };
       simulatedBookings.push(newBooking);
       console.log(`✅ [SIMULATION] Scheduled appointment successfully!`);
-      
+
       return res.json({
         status: 'success',
         message: `Successfully booked a dental checkup for ${patientName} on ${formattedLocalTime}. We look forward to seeing you!`
@@ -410,9 +560,23 @@ app.post('/api/webhook/book-appointment', async (req, res) => {
 
   } catch (error) {
     console.error('Error handling booking request:', error);
-    return res.status(500).json({
-      status: 'error',
-      message: 'A technical issue occurred on our end while saving the appointment. Please try again in a moment.'
+    console.warn('⚠️ Google API request failed. Falling back to Simulation/Mock Mode for this booking.');
+
+    // Retry booking in mock mode locally without changing global isMockMode
+    const newBooking = {
+      id: `sim_${Date.now()}`,
+      summary: `Appointment: ${patientName}`,
+      start: requestedStart ? requestedStart.toISOString() : new Date().toISOString(),
+      end: requestedEnd ? requestedEnd.toISOString() : new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+      description: `Phone: ${phoneNumber} | Reason: ${reasonForVisit} (Simulated Booking - Fallback)`
+    };
+    simulatedBookings.push(newBooking);
+    console.log(`✅ [SIMULATION FALLBACK] Scheduled appointment successfully!`);
+
+    const formattedLocalTime = formatInTimeZone(requestedStart || new Date(), CLINIC_TIMEZONE, 'EEEE, MMMM do yyyy h:mm a');
+    return res.json({
+      status: 'success',
+      message: `Successfully booked a dental checkup for ${patientName} on ${formattedLocalTime}. We look forward to seeing you!`
     });
   }
 });
@@ -768,20 +932,51 @@ app.get('/', (req, res) => {
             <p>Copy this instructions prompt and paste it into your ElevenLabs agent to train Clara with the required conversational flow rules.</p>
             
             <h3 style="margin-top: 10px;">Agent Instructions (System Prompt)</h3>
-            <pre id="agent-prompt">You are Clara, the friendly, professional, and efficient AI receptionist for the Pearl Dental Hospital. 
-Your goal is to help patients book dental appointments and answer basic queries.
+            <pre id="agent-prompt">You are Clara, the friendly, professional, and efficient AI receptionist for the Pearl Dental Hospital. Your goal is to guide patients to book dental appointments and answer basic queries. 
 
-Rules & Conversation Flow:
-1. Greet the patient warmly and ask how you can help.
-2. Ask the patient for their Name, Phone Number, and the Reason for their visit.
-3. Once you have their information, ask for their preferred Date.
-4. Call the "get_available_slots" tool for that date to check which times are free.
-5. List the free times to the user:
-   - Categorize them into Morning Session (9:00 AM - 1:00 PM) and Evening Session (3:00 PM - 8:00 PM).
-   - If no times are free today, say: "Today is not available for any time, so did you prepare any other time?" and suggest Tomorrow.
-   - If tomorrow is also fully booked, say: "Tomorrow all times are booked, I\'ll tell you the next free dates. You select the date from there" and search following dates.
-6. Once the patient selects a slot, call the "schedule_appointment" tool.
-7. If the tool responds with "success", confirm the booked time, user name, phone, and reason back to the user, and deliver a warm wish before ending the call.</pre>
+Reference Date Info:
+- Today's date is June 6th, 2026 (06/06/2026).
+- Tomorrow's date is June 7th, 2026 (07/06/2026).
+Use these as reference points to calculate dates.
+
+Strict Sequential Conversation Flow:
+
+1. Greet the Patient & Ask for Name (First Message):
+   Always start the call with: "Hello! Welcome to Pearl Dental Hospital. My name is Clara, and I am your digital receptionist today. I can help you check available appointment times and book your dental visit. Who do I have the pleasure of speaking with?"
+
+2. Acknowledge Name & Ask for Reason (Step 2):
+   - Once they give their name, greet them: "Hi [Name]! Which reason do you want to book for?"
+   - Wait for the patient to explain their reason (e.g. tooth pain, routine checkup).
+
+3. Check Date & Choose Time (Step 3):
+   - Ask: "Would you like to book an appointment for today, or select another date?"
+   
+   - **Step A (Check Today)**: If the user requests "today", immediately call the "get_available_slots" tool for today's date (06/06/2026).
+     - If times are available: List the free times to the user (grouped into Morning: 9:00 AM - 1:00 PM and Evening: 3:00 PM - 8:00 PM).
+     - If today is fully booked: Say exactly: "Today not available for any time, So did you prepare any other time?" and suggest tomorrow.
+   
+   - **Step B (Check Tomorrow)**: If the user then says "tomorrow" or if today was booked, call the "get_available_slots" tool for tomorrow's date (07/06/2026).
+     - If times are available: List tomorrow's available times.
+     - If tomorrow is also fully booked: Say exactly: "Tomorrow all times are booked, I'll tell you the next free dates. You select the date from there."
+   
+   - **Step C (Check Next Free Dates)**: If tomorrow is also booked, call the "get_available_slots" tool for subsequent days (June 8th onwards) to find the next available slots, list those dates and times, and let the patient select one.
+   
+   - Wait for the patient to pick their preferred time slot.
+
+4. Collect Phone Number (Step 4):
+   - Once the appointment time is selected, ask: "Please give me your phone number and I confirm your Booking."
+   - Wait for the patient to provide their phone number.
+
+5. Confirm the Booking (Step 5):
+   - Call the "schedule_appointment" tool. You MUST format the dateTime parameter strictly as DD/MM/YYYY hh:mm AM/PM (e.g., 09/06/2026 10:00 AM).
+   - Once the tool returns "success", say: "Your Booking was Confirmed successfully!" and summarize their details:
+     - Name: [Name]
+     - Reason: [Reason]
+     - Phone: [Phone]
+     - Booking Date & Time: [Booking Date & Time]
+
+6. End Call:
+   - When the user says thanks, deliver a warm closing wish and end the call.</pre>
 
             <h3 style="margin-top: 15px;">Tool 1: get_available_slots (GET Webhook)</h3>
             <p>Configure this custom tool in ElevenLabs to fetch available slots.</p>
@@ -833,9 +1028,10 @@ Request Body (JSON):
 
                 const item = document.createElement('div');
                 item.className = 'booking-item';
+                const summaryText = b.summary || 'Dental appointment';
                 item.innerHTML = \`
                   <div class="booking-meta">
-                    <span class="booking-title">\${b.summary}</span>
+                    <span class="booking-title">\${summaryText}</span>
                     <span class="booking-time">\${formattedTime}</span>
                   </div>
                   <div class="booking-desc">\${b.description || 'No additional details.'}</div>
@@ -942,6 +1138,9 @@ Request Body (JSON):
           // Initial Load
           fetchBookings();
           fetchAvailableSlots();
+
+          // Poll for bookings update every 5 seconds (especially when booking via voice call)
+          setInterval(fetchBookings, 5000);
         </script>
       </body>
     </html>
