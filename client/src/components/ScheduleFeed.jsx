@@ -2,8 +2,6 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { format, parseISO, isToday, isTomorrow } from 'date-fns';
 import { Calendar, Clock, Phone, FileText, RefreshCw, Search } from 'lucide-react';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
-
 export default function ScheduleFeed({ refreshTrigger }) {
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -12,7 +10,7 @@ export default function ScheduleFeed({ refreshTrigger }) {
   const fetchBookings = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE_URL}/api/bookings`);
+      const res = await fetch('/api/bookings');
       const data = await res.json();
       if (data.status === 'success') {
         setBookings(data.bookings);
