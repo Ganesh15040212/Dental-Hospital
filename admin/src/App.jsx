@@ -10,9 +10,7 @@ import {
   Eye,
   EyeOff,
   Mail,
-  LogOut,
-  Lock,
-  AlertCircle
+  LogOut
 } from 'lucide-react';
 import { format, parseISO, isToday, isTomorrow } from 'date-fns';
 
