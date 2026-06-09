@@ -136,6 +136,18 @@ const simulatedBookings = [
 // ============================================================================
 
 /**
+ * Returns the current date-time.
+ * In Mock/Simulation mode, treats the current time as June 5, 2026 at 08:00 AM local time
+ * to match the mock environment setup and ElevenLabs testing parameters.
+ */
+function getCurrentTime() {
+  if (isMockMode) {
+    return fromZonedTime('2026-06-05T08:00:00', CLINIC_TIMEZONE);
+  }
+  return new Date();
+}
+
+/**
  * Safely parses an ISO date-time string. 
  * If it has a timezone offset, standard Date parsing is used.
  * If it lacks an offset, it is parsed as local time in the clinic's timezone.
@@ -179,7 +191,7 @@ function parseDateTimeInZone(dateTimeStr, timeZone) {
  */
 function validateWorkingHours(date) {
   // Prevent booking times that have already passed
-  if (date < new Date()) {
+  if (date < getCurrentTime()) {
     return {
       isValid: false,
       reason: "The requested time has already passed. Please select a future date and time."
@@ -256,7 +268,7 @@ app.get('/api/webhook/available-slots', async (req, res) => {
 
   // Default to today if no date provided
   if (!date) {
-    const nowLocal = toZonedTime(new Date(), CLINIC_TIMEZONE);
+    const nowLocal = toZonedTime(getCurrentTime(), CLINIC_TIMEZONE);
     date = format(nowLocal, 'yyyy-MM-dd');
   } else {
     // Normalize if DD/MM/YYYY is passed
@@ -277,7 +289,7 @@ app.get('/api/webhook/available-slots', async (req, res) => {
         const slotStart = fromZonedTime(slotStartStr, CLINIC_TIMEZONE);
         const slotEnd = new Date(slotStart.getTime() + 60 * 60 * 1000); // 1 hour slots
 
-        const isPast = slotStart < new Date();
+        const isPast = slotStart < getCurrentTime();
         const isBooked = isPast || await checkOverlap(slotStart, slotEnd);
         const label = formatInTimeZone(slotStart, CLINIC_TIMEZONE, 'hh:mm a');
 
@@ -566,14 +578,14 @@ app.post('/api/webhook/book-appointment', async (req, res) => {
     const newBooking = {
       id: `sim_${Date.now()}`,
       summary: `Appointment: ${patientName}`,
-      start: requestedStart ? requestedStart.toISOString() : new Date().toISOString(),
-      end: requestedEnd ? requestedEnd.toISOString() : new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+      start: requestedStart ? requestedStart.toISOString() : getCurrentTime().toISOString(),
+      end: requestedEnd ? requestedEnd.toISOString() : new Date(getCurrentTime().getTime() + 60 * 60 * 1000).toISOString(),
       description: `Phone: ${phoneNumber} | Reason: ${reasonForVisit} (Simulated Booking - Fallback)`
     };
     simulatedBookings.push(newBooking);
     console.log(`✅ [SIMULATION FALLBACK] Scheduled appointment successfully!`);
 
-    const formattedLocalTime = formatInTimeZone(requestedStart || new Date(), CLINIC_TIMEZONE, 'EEEE, MMMM do yyyy h:mm a');
+    const formattedLocalTime = formatInTimeZone(requestedStart || getCurrentTime(), CLINIC_TIMEZONE, 'EEEE, MMMM do yyyy h:mm a');
     return res.json({
       status: 'success',
       message: `Successfully booked a dental checkup for ${patientName} on ${formattedLocalTime}. We look forward to seeing you!`
