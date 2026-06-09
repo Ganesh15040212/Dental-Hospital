@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import {
-  HeartPulse,
-  Calendar,
-  RefreshCw,
-  Search,
-  Clock,
-  Phone,
-  FileText,
+import { 
+  HeartPulse, 
+  Calendar, 
+  RefreshCw, 
+  Search, 
+  Clock, 
+  Phone, 
+  FileText, 
   Eye,
   EyeOff,
   Mail,
@@ -75,7 +75,7 @@ export default function App() {
     if (!desc) return { phone: 'N/A', reason: 'N/A' };
     let phone = '';
     let reason = '';
-
+    
     if (desc.includes('|')) {
       const parts = desc.split('|');
       parts.forEach(part => {
@@ -102,7 +102,7 @@ export default function App() {
         }
       });
     }
-
+    
     return {
       phone: phone || 'N/A',
       reason: reason || 'N/A'
@@ -157,8 +157,8 @@ export default function App() {
                 <span className="login-input-icon">
                   <Mail size={16} />
                 </span>
-                <input
-                  type="email"
+                <input 
+                  type="email" 
                   value={loginEmail}
                   onChange={(e) => setLoginEmail(e.target.value)}
                   placeholder="admin@pearldental.com"
@@ -174,7 +174,7 @@ export default function App() {
                 <span className="login-input-icon">
                   <Lock size={16} />
                 </span>
-                <input
+                <input 
                   type={showLoginPassword ? "text" : "password"}
                   value={loginPassword}
                   onChange={(e) => setLoginPassword(e.target.value)}
@@ -183,8 +183,8 @@ export default function App() {
                   style={{ paddingRight: '2.75rem' }}
                   required
                 />
-                <button
-                  type="button"
+                <button 
+                  type="button" 
                   onClick={() => setShowLoginPassword(!showLoginPassword)}
                   style={{ position: 'absolute', right: '0.85rem', top: '50%', transform: 'translateY(-50%)', background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', display: 'flex', alignItems: 'center' }}
                 >
@@ -215,7 +215,7 @@ export default function App() {
         </div>
 
         <nav className="admin-nav">
-          <button
+          <button 
             className="admin-nav-btn active"
             style={{ cursor: 'default' }}
           >
@@ -223,7 +223,7 @@ export default function App() {
             <span>Appointments</span>
           </button>
 
-          <button
+          <button 
             onClick={handleLogout}
             className="admin-nav-btn"
             style={{ color: 'var(--accent-red)', marginLeft: '0.5rem' }}
@@ -237,14 +237,15 @@ export default function App() {
 
       {/* Main Content Dashboard */}
       <main className="admin-main">
+        {/* APPOINTMENTS TAB SCREEN */}
         <div className="panel animate-fade-in">
           <div className="panel-header">
             <div>
               <h2>Upcoming Patient Schedule</h2>
               <p>Real-time view of dental appointments synced from Google Calendar / Database.</p>
             </div>
-            <button
-              onClick={fetchBookings}
+            <button 
+              onClick={fetchBookings} 
               className={`icon-btn ${loadingBookings ? 'active' : ''}`}
               disabled={loadingBookings}
               title="Refresh Schedule"
@@ -258,8 +259,8 @@ export default function App() {
             <span className="search-icon-wrapper">
               <Search size={15} />
             </span>
-            <input
-              type="text"
+            <input 
+              type="text" 
               placeholder="Search by patient name, phone number, or visit reason..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
@@ -278,8 +279,8 @@ export default function App() {
               <div style={{ textAlign: 'center', padding: '4rem 0', border: '2px dashed var(--panel-border)', borderRadius: '18px', background: 'var(--bg-primary)' }}>
                 <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem' }}>No upcoming dental appointments found.</p>
                 {searchTerm && (
-                  <button
-                    onClick={() => setSearchTerm('')}
+                  <button 
+                    onClick={() => setSearchTerm('')} 
                     className="btn"
                     style={{ background: 'transparent', color: 'var(--text-secondary)', border: '1px solid var(--panel-border)', fontSize: '0.8rem', padding: '0.4rem 1rem', marginTop: '0.75rem' }}
                   >
