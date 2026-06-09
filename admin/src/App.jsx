@@ -237,7 +237,6 @@ export default function App() {
 
       {/* Main Content Dashboard */}
       <main className="admin-main">
-        {/* APPOINTMENTS TAB SCREEN */}
         <div className="panel animate-fade-in">
           <div className="panel-header">
             <div>
