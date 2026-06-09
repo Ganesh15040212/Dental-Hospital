@@ -271,10 +271,39 @@ app.get('/api/webhook/available-slots', async (req, res) => {
     const nowLocal = toZonedTime(getCurrentTime(), CLINIC_TIMEZONE);
     date = format(nowLocal, 'yyyy-MM-dd');
   } else {
-    // Normalize if DD/MM/YYYY is passed
-    const match = date.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-    if (match) {
-      date = `${match[3]}-${match[2]}-${match[1]}`;
+    try {
+      let parsedDate;
+      const match = date.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+      if (match) {
+        parsedDate = fromZonedTime(`${match[3]}-${match[2]}-${match[1]}T00:00:00`, CLINIC_TIMEZONE);
+      } else {
+        // Clean ordinal suffixes like "th", "st", "nd", "rd" (e.g. "June 7th, 2026" -> "June 7, 2026")
+        const cleanDateStr = date.replace(/(\d+)(st|nd|rd|th)/i, '$1');
+        const isoMatch = cleanDateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (isoMatch) {
+          parsedDate = fromZonedTime(`${cleanDateStr}T00:00:00`, CLINIC_TIMEZONE);
+        } else {
+          const rawParsed = new Date(cleanDateStr);
+          if (!isNaN(rawParsed.getTime())) {
+            const yyyy = rawParsed.getFullYear();
+            const mm = String(rawParsed.getMonth() + 1).padStart(2, '0');
+            const dd = String(rawParsed.getDate()).padStart(2, '0');
+            parsedDate = fromZonedTime(`${yyyy}-${mm}-${dd}T00:00:00`, CLINIC_TIMEZONE);
+          }
+        }
+      }
+
+      if (parsedDate && !isNaN(parsedDate.getTime())) {
+        date = formatInTimeZone(parsedDate, CLINIC_TIMEZONE, 'yyyy-MM-dd');
+      } else {
+        console.warn(`⚠️ Warning: Could not parse slot date "${date}". Falling back to current date.`);
+        const nowLocal = toZonedTime(getCurrentTime(), CLINIC_TIMEZONE);
+        date = formatInTimeZone(nowLocal, CLINIC_TIMEZONE, 'yyyy-MM-dd');
+      }
+    } catch (err) {
+      console.error('Error parsing input date:', err);
+      const nowLocal = toZonedTime(getCurrentTime(), CLINIC_TIMEZONE);
+      date = formatInTimeZone(nowLocal, CLINIC_TIMEZONE, 'yyyy-MM-dd');
     }
   }
 
