@@ -10,11 +10,11 @@ import {
   Eye,
   EyeOff,
   Mail,
-  LogOut
+  LogOut,
+  Lock,
+  AlertCircle
 } from 'lucide-react';
 import { format, parseISO, isToday, isTomorrow } from 'date-fns';
-
-const BACKEND_URL = import.meta.env.VITE_API_URL || '';
 
 export default function App() {
   // Bookings list state
@@ -50,7 +50,7 @@ export default function App() {
   const fetchBookings = useCallback(async () => {
     setLoadingBookings(true);
     try {
-      const res = await fetch(`${BACKEND_URL}/api/bookings`);
+      const res = await fetch('/api/bookings');
       const data = await res.json();
       if (data.status === 'success') {
         setBookings(data.bookings);
