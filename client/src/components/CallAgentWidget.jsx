@@ -453,15 +453,16 @@ export default function CallAgentWidget({ isOpen, setIsOpen, mode, setMode }) {
                   type="text" 
                   value={inputText}
                   onChange={(e) => setInputText(e.target.value)}
-                  placeholder="Send a message..."
+                  placeholder={status === 'connected' ? "Send a message..." : status === 'connecting' ? "Connecting..." : "Offline. Open/restart chat."}
                   className="drawer-chat-input-field"
+                  disabled={status !== 'connected'}
                 />
                 
                 {/* Circular Send Button inside input bar */}
                 <button 
                   type="submit" 
-                  className={`drawer-chat-send-btn ${inputText.trim() ? 'active' : ''}`}
-                  disabled={!inputText.trim()}
+                  className={`drawer-chat-send-btn ${inputText.trim() && status === 'connected' ? 'active' : ''}`}
+                  disabled={!inputText.trim() || status !== 'connected'}
                   title="Send Message"
                 >
                   <ArrowUp size={16} />

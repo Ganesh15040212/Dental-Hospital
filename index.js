@@ -473,7 +473,7 @@ app.post('/api/signed-url', async (req, res) => {
           headers: {
             'xi-api-key': apiKey,
           },
-          signal: AbortSignal.timeout(3000)
+          signal: AbortSignal.timeout(10000)
         }
       );
 
@@ -496,7 +496,7 @@ app.post('/api/signed-url', async (req, res) => {
           headers: {
             'xi-api-key': apiKey,
           },
-          signal: AbortSignal.timeout(3000)
+          signal: AbortSignal.timeout(10000)
         }
       );
 
