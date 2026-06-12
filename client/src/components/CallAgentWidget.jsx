@@ -72,6 +72,18 @@ export default function CallAgentWidget({ isOpen, setIsOpen, mode, setMode }) {
 
     setMessages([]);
 
+    // Fetch dynamic system prompt from backend with correct dates
+    let promptOverride = null;
+    try {
+      const promptRes = await fetch('/api/agent-prompt');
+      const promptData = await promptRes.json();
+      if (promptData.status === 'success') {
+        promptOverride = promptData.prompt;
+      }
+    } catch (err) {
+      console.warn('Failed to fetch dynamic agent prompt:', err);
+    }
+
     try {
       if (targetMode === 'voice') {
         // Explicitly request microphone access for voice call
@@ -99,6 +111,34 @@ export default function CallAgentWidget({ isOpen, setIsOpen, mode, setMode }) {
         }
       } catch (tokenErr) {
         console.warn('Failed to fetch session authorization, falling back to agentId directly:', tokenErr);
+      }
+
+      const todayDate = new Date();
+      const tomorrowDate = new Date();
+      tomorrowDate.setDate(todayDate.getDate() + 1);
+
+      const localeOptions = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+      const todayFormatted = todayDate.toLocaleDateString('en-US', localeOptions);
+      const tomorrowFormatted = tomorrowDate.toLocaleDateString('en-US', localeOptions);
+
+      const todayISO = todayDate.toISOString().split('T')[0];
+      const tomorrowISO = tomorrowDate.toISOString().split('T')[0];
+
+      const agentOverrides = {
+        agent: {
+          prompt: {
+            dynamic_variables: {
+              current_date: todayFormatted,
+              tomorrow_date: tomorrowFormatted,
+              current_date_iso: todayISO,
+              tomorrow_date_iso: tomorrowISO
+            }
+          }
+        }
+      };
+
+      if (promptOverride) {
+        agentOverrides.agent.prompt.prompt = promptOverride;
       }
 
       const sessionParams = {
@@ -131,7 +171,8 @@ export default function CallAgentWidget({ isOpen, setIsOpen, mode, setMode }) {
         sessionParams.overrides = {
           conversation: {
             textOnly: true
-          }
+          },
+          ...agentOverrides
         };
       } else {
         if (conversationToken) {
@@ -140,6 +181,9 @@ export default function CallAgentWidget({ isOpen, setIsOpen, mode, setMode }) {
           sessionParams.agentId = agentId;
         }
         sessionParams.connectionType = 'webrtc';
+        sessionParams.overrides = {
+          ...agentOverrides
+        };
       }
 
       await startSession(sessionParams);
