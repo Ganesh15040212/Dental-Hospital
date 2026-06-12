@@ -173,6 +173,31 @@ function parseDateTimeInZone(dateTimeStr, timeZone) {
 }
 
 /**
+ * Automatically shifts requested dates that fall within the static simulation prompt window
+ * (June 6th, 2026 onwards) to line up with the current actual system date as "today".
+ */
+function mapSimulationDate(parsedDate, timeZone) {
+  if (!parsedDate || isNaN(parsedDate.getTime())) return parsedDate;
+
+  const dateOnlyStr = formatInTimeZone(parsedDate, timeZone, 'yyyy-MM-dd');
+  const dateOnlyStart = fromZonedTime(dateOnlyStr + 'T00:00:00', timeZone);
+
+  const refBaseDate = fromZonedTime('2026-06-06T00:00:00', timeZone);
+  const nowLocal = toZonedTime(getCurrentTime(), timeZone);
+  const todayStart = fromZonedTime(formatInTimeZone(nowLocal, timeZone, 'yyyy-MM-dd') + 'T00:00:00', timeZone);
+
+  // If the parsed date falls in the static training prompt window (June 6th, 2026 up to today's date)
+  if (dateOnlyStart >= refBaseDate && dateOnlyStart < todayStart) {
+    const todayShift = todayStart.getTime() - refBaseDate.getTime();
+    const finalDate = new Date(parsedDate.getTime() + todayShift);
+    console.log(`🔄 [Simulation Date Mapping] Shifting static reference date ${formatInTimeZone(parsedDate, timeZone, 'yyyy-MM-dd HH:mm')} to current relative date: ${formatInTimeZone(finalDate, timeZone, 'yyyy-MM-dd HH:mm')}`);
+    return finalDate;
+  }
+  return parsedDate;
+}
+
+
+/**
  * Checks if a given date falls within business hours:
  * Morning: 9:00 AM - 1:00 PM (starts 9am-12pm)
  * Evening: 3:00 PM - 8:00 PM (starts 3pm-7pm)
@@ -283,6 +308,7 @@ app.get('/api/webhook/available-slots', async (req, res) => {
       }
 
       if (parsedDate && !isNaN(parsedDate.getTime())) {
+        parsedDate = mapSimulationDate(parsedDate, CLINIC_TIMEZONE);
         date = formatInTimeZone(parsedDate, CLINIC_TIMEZONE, 'yyyy-MM-dd');
       } else {
         console.warn(`⚠️ Warning: Could not parse slot date "${date}". Falling back to current date.`);
@@ -583,6 +609,9 @@ app.post('/api/webhook/book-appointment', async (req, res) => {
         message: 'Invalid date-time format. Please provide a valid date and time.'
       });
     }
+
+    // Map static simulation/mock training dates automatically to relative current dates
+    requestedStart = mapSimulationDate(requestedStart, CLINIC_TIMEZONE);
 
     // A. Validate Working Hours First
     const hoursValidation = validateWorkingHours(requestedStart);
