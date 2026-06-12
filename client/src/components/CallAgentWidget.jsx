@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useConversationControls, useConversationStatus } from '@elevenlabs/react';
 import { Phone, PhoneOff, MessageSquare, ArrowUp, Volume2, MessageCircle, AlertCircle, Calendar, ChevronDown, HeartPulse } from 'lucide-react';
 
+const BACKEND_URL = import.meta.env.VITE_API_URL || '';
+
 export default function CallAgentWidget({ isOpen, setIsOpen, mode, setMode }) {
   const { startSession, endSession, sendUserMessage } = useConversationControls();
   const { status } = useConversationStatus();
@@ -16,7 +18,7 @@ export default function CallAgentWidget({ isOpen, setIsOpen, mode, setMode }) {
   useEffect(() => {
     async function loadAgentId() {
       try {
-        const res = await fetch('/api/agent-id');
+        const res = await fetch(`${BACKEND_URL}/api/agent-id`);
         const data = await res.json();
         if (data.status === 'success' && data.agentId) {
           setAgentId(data.agentId);
@@ -46,7 +48,7 @@ export default function CallAgentWidget({ isOpen, setIsOpen, mode, setMode }) {
     const clientTools = {
       get_available_slots: async ({ date }) => {
         try {
-          const res = await fetch(`/api/webhook/available-slots?date=${date}`);
+          const res = await fetch(`${BACKEND_URL}/api/webhook/available-slots?date=${date}`);
           const data = await res.json();
           return data;
         } catch (err) {
@@ -56,7 +58,7 @@ export default function CallAgentWidget({ isOpen, setIsOpen, mode, setMode }) {
       },
       schedule_appointment: async ({ patientName, phoneNumber, reasonForVisit, dateTime }) => {
         try {
-          const res = await fetch('/api/webhook/book-appointment', {
+          const res = await fetch(`${BACKEND_URL}/api/webhook/book-appointment`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ patientName, phoneNumber, reasonForVisit, dateTime })
@@ -75,7 +77,7 @@ export default function CallAgentWidget({ isOpen, setIsOpen, mode, setMode }) {
     // Fetch dynamic system prompt from backend with correct dates
     let promptOverride = null;
     try {
-      const promptRes = await fetch('/api/agent-prompt');
+      const promptRes = await fetch(`${BACKEND_URL}/api/agent-prompt`);
       const promptData = await promptRes.json();
       if (promptData.status === 'success') {
         promptOverride = promptData.prompt;
@@ -94,7 +96,7 @@ export default function CallAgentWidget({ isOpen, setIsOpen, mode, setMode }) {
       let signedUrl = null;
       let conversationToken = null;
       try {
-        const tokenRes = await fetch('/api/signed-url', {
+        const tokenRes = await fetch(`${BACKEND_URL}/api/signed-url`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ mode: targetMode })
