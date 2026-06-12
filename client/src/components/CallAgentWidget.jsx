@@ -10,6 +10,7 @@ export default function CallAgentWidget({ isOpen, setIsOpen, mode, setMode }) {
   const [agentId, setAgentId] = useState('');
   const [messages, setMessages] = useState([]);
   const [inputText, setInputText] = useState('');
+  const [errorMsg, setErrorMsg] = useState('');
   
   const chatEndRef = useRef(null);
   const prevIsOpen = useRef(isOpen);
@@ -40,6 +41,7 @@ export default function CallAgentWidget({ isOpen, setIsOpen, mode, setMode }) {
   // Start ElevenLabs Session
   const handleStart = async (selectedMode) => {
     const targetMode = selectedMode || mode;
+    setErrorMsg('');
     if (!agentId) {
       alert('AI Receptionist is currently offline. Please configure your ElevenLabs Agent ID in the Admin Dashboard (http://localhost:5175) to enable the voice and chat assistant.');
       return;
@@ -158,8 +160,27 @@ export default function CallAgentWidget({ isOpen, setIsOpen, mode, setMode }) {
             });
           }
         },
+        onAgentChatResponsePart: (part) => {
+          if (part.type === 'start') {
+            setMessages(prev => [...prev, { role: 'assistant', text: '' }]);
+          } else if (part.type === 'delta' && part.text) {
+            setMessages(prev => {
+              const newMsgs = [...prev];
+              const lastIndex = newMsgs.length - 1;
+              if (lastIndex >= 0 && newMsgs[lastIndex].role === 'assistant') {
+                newMsgs[lastIndex] = {
+                  ...newMsgs[lastIndex],
+                  text: newMsgs[lastIndex].text + part.text
+                };
+                return newMsgs;
+              }
+              return [...prev, { role: 'assistant', text: part.text }];
+            });
+          }
+        },
         onError: (err) => {
           console.error('ElevenLabs SDK connection error:', err);
+          setErrorMsg(typeof err === 'string' ? err : err.message || 'Connection failed.');
         }
       };
 
@@ -170,6 +191,7 @@ export default function CallAgentWidget({ isOpen, setIsOpen, mode, setMode }) {
           sessionParams.agentId = agentId;
         }
         sessionParams.connectionType = 'websocket';
+        sessionParams.textOnly = true;
         sessionParams.overrides = {
           conversation: {
             textOnly: true
@@ -431,7 +453,62 @@ export default function CallAgentWidget({ isOpen, setIsOpen, mode, setMode }) {
           ) : (
             /* Chat Mode Body (Chat message history & black-bordered input) */
             <div className="drawer-chat-container">
+              {/* Chat Status Banner */}
+              <div style={{ 
+                display: 'flex', 
+                justify-content: 'space-between', 
+                align-items: 'center', 
+                padding: '0.5rem 0.75rem', 
+                borderBottom: '1px solid var(--panel-border)', 
+                fontSize: '0.75rem', 
+                color: 'var(--text-muted)',
+                background: 'var(--bg-secondary)',
+                borderRadius: '8px 8px 0 0'
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <span className={`drawer-status-dot ${status === 'connected' ? 'active' : status === 'connecting' ? 'connecting' : 'idle'}`} />
+                  <span style={{ fontWeight: 600 }}>
+                    {status === 'connected' ? 'Clara Online' : status === 'connecting' ? 'Connecting to Clara...' : 'Offline'}
+                  </span>
+                </div>
+                {status !== 'connected' && status !== 'connecting' && (
+                  <button 
+                    onClick={() => handleStart('chat')} 
+                    type="button"
+                    style={{ 
+                      background: 'transparent', 
+                      border: 'none', 
+                      color: 'var(--accent-violet)', 
+                      fontWeight: 700, 
+                      cursor: 'pointer', 
+                      fontSize: '0.75rem', 
+                      padding: 0 
+                    }}
+                  >
+                    Connect
+                  </button>
+                )}
+              </div>
+
               <div className="drawer-chat-history">
+                {errorMsg && (
+                  <div style={{ 
+                    background: 'rgba(239, 68, 68, 0.08)', 
+                    border: '1px solid rgba(239, 68, 68, 0.2)', 
+                    padding: '0.75rem', 
+                    borderRadius: '12px', 
+                    color: 'var(--accent-red)', 
+                    fontSize: '0.8rem', 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    gap: '0.5rem', 
+                    marginBottom: '0.5rem' 
+                  }}>
+                    <AlertCircle size={14} style={{ flexShrink: 0 }} />
+                    <span style={{ fontWeight: 500 }}>{errorMsg}</span>
+                  </div>
+                )}
+
                 {messages.length === 0 ? (
                   <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)', textAlign: 'center', padding: '0 1rem' }}>
                     <MessageSquare size={32} style={{ color: 'var(--accent-violet)', opacity: 0.3, marginBottom: '0.5rem' }} />
@@ -441,7 +518,7 @@ export default function CallAgentWidget({ isOpen, setIsOpen, mode, setMode }) {
                   messages.map((msg, idx) => (
                     <div key={idx} className={`chat-message-row ${msg.role === 'user' ? 'user' : 'assistant'}`}>
                       <div className={`chat-bubble ${msg.role === 'user' ? 'user' : 'assistant'}`}>
-                        {msg.text}
+                        {msg.text || (status === 'connected' && idx === messages.length - 1 ? '...' : '')}
                       </div>
                     </div>
                   ))
@@ -450,20 +527,21 @@ export default function CallAgentWidget({ isOpen, setIsOpen, mode, setMode }) {
               </div>
 
               {/* Black Bordered rounded-rect input container (3rd Image) */}
-              <form onSubmit={handleSendMessage} className="drawer-chat-input-bar">
+              <form onSubmit={handleSendMessage} className="drawer-chat-input-bar" style={{ opacity: status === 'connected' ? 1 : 0.6 }}>
                 <input 
                   type="text" 
                   value={inputText}
                   onChange={(e) => setInputText(e.target.value)}
-                  placeholder="Send a message..."
+                  placeholder={status === 'connected' ? "Send a message..." : status === 'connecting' ? "Connecting to Clara..." : "Connect to start chatting..."}
                   className="drawer-chat-input-field"
+                  disabled={status !== 'connected'}
                 />
                 
                 {/* Circular Send Button inside input bar */}
                 <button 
                   type="submit" 
-                  className={`drawer-chat-send-btn ${inputText.trim() ? 'active' : ''}`}
-                  disabled={!inputText.trim()}
+                  className={`drawer-chat-send-btn ${inputText.trim() && status === 'connected' ? 'active' : ''}`}
+                  disabled={!inputText.trim() || status !== 'connected'}
                   title="Send Message"
                 >
                   <ArrowUp size={16} />
