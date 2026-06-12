@@ -70,70 +70,71 @@ if (process.env.MOCK_MODE === 'true') {
   isMockMode = true;
 }
 
-// In-memory array initialized with predefined booked appointments
-// Predefined dates: June 7, 9, 10, 13 of 2026.
+// Helper to get ISO string for a specific relative date and time in the clinic timezone
+function getRelativeISOString(daysOffset, hour, minute = 0) {
+  const base = toZonedTime(new Date(), CLINIC_TIMEZONE);
+  base.setDate(base.getDate() + daysOffset);
+  base.setHours(hour, minute, 0, 0);
+  return fromZonedTime(base, CLINIC_TIMEZONE).toISOString();
+}
+
+// In-memory array initialized with predefined booked appointments relative to current date.
 const simulatedBookings = [
   {
     id: 'pre_1',
     summary: 'Appointment: Ganesh',
-    start: fromZonedTime('2026-06-07T10:00:00', CLINIC_TIMEZONE).toISOString(),
-    end: fromZonedTime('2026-06-07T11:00:00', CLINIC_TIMEZONE).toISOString(),
+    start: getRelativeISOString(1, 10), // Tomorrow 10:00 AM
+    end: getRelativeISOString(1, 11),
     description: 'Phone: 8433198543 | Reason: Tooth pain'
   },
   {
     id: 'pre_2',
     summary: 'Appointment: John Doe',
-    start: fromZonedTime('2026-06-07T16:00:00', CLINIC_TIMEZONE).toISOString(),
-    end: fromZonedTime('2026-06-07T17:00:00', CLINIC_TIMEZONE).toISOString(),
+    start: getRelativeISOString(1, 16), // Tomorrow 4:00 PM
+    end: getRelativeISOString(1, 17),
     description: 'Phone: +15550100 | Reason: Routine Checkup'
   },
   {
     id: 'pre_3',
     summary: 'Appointment: Sarah Connor',
-    start: fromZonedTime('2026-06-09T09:00:00', CLINIC_TIMEZONE).toISOString(),
-    end: fromZonedTime('2026-06-09T10:00:00', CLINIC_TIMEZONE).toISOString(),
+    start: getRelativeISOString(2, 9), // Day after tomorrow 9:00 AM
+    end: getRelativeISOString(2, 10),
     description: 'Phone: +15550200 | Reason: Cleaning'
   },
   {
     id: 'pre_4',
     summary: 'Appointment: Bruce Wayne',
-    start: fromZonedTime('2026-06-09T15:00:00', CLINIC_TIMEZONE).toISOString(),
-    end: fromZonedTime('2026-06-09T16:00:00', CLINIC_TIMEZONE).toISOString(),
+    start: getRelativeISOString(2, 15), // Day after tomorrow 3:00 PM
+    end: getRelativeISOString(2, 16),
     description: 'Phone: +15550300 | Reason: Consultation'
   },
   {
     id: 'pre_5',
     summary: 'Appointment: Peter Parker',
-    start: fromZonedTime('2026-06-10T11:00:00', CLINIC_TIMEZONE).toISOString(),
-    end: fromZonedTime('2026-06-10T12:00:00', CLINIC_TIMEZONE).toISOString(),
+    start: getRelativeISOString(3, 11), // Day +3 11:00 AM
+    end: getRelativeISOString(3, 12),
     description: 'Phone: +15550400 | Reason: Toothache'
   },
   {
     id: 'pre_6',
     summary: 'Appointment: Clark Kent',
-    start: fromZonedTime('2026-06-10T17:00:00', CLINIC_TIMEZONE).toISOString(),
-    end: fromZonedTime('2026-06-10T18:00:00', CLINIC_TIMEZONE).toISOString(),
+    start: getRelativeISOString(3, 17), // Day +3 5:00 PM
+    end: getRelativeISOString(3, 18),
     description: 'Phone: +15550500 | Reason: Root Canal'
-  },
-  {
-    id: 'pre_7',
-    summary: 'Appointment: Diana Prince',
-    start: fromZonedTime('2026-06-13T12:00:00', CLINIC_TIMEZONE).toISOString(),
-    end: fromZonedTime('2026-06-13T13:00:00', CLINIC_TIMEZONE).toISOString(),
-    description: 'Phone: +15550600 | Reason: Consultation'
-  },
-  {
-    id: 'pre_8',
-    summary: 'Appointment: Tony Stark',
-    start: fromZonedTime('2026-06-13T19:00:00', CLINIC_TIMEZONE).toISOString(),
-    end: fromZonedTime('2026-06-13T20:00:00', CLINIC_TIMEZONE).toISOString(),
-    description: 'Phone: +15550700 | Reason: Teeth whitening'
   }
 ];
 
 // ============================================================================
 // 2. Helper Functions: Timezone-Safe Parsing, Working Hours & Overlaps
 // ============================================================================
+
+/**
+ * Returns the current date-time.
+ * Uses the actual system current time.
+ */
+function getCurrentTime() {
+  return new Date();
+}
 
 /**
  * Safely parses an ISO date-time string. 
@@ -172,6 +173,31 @@ function parseDateTimeInZone(dateTimeStr, timeZone) {
 }
 
 /**
+ * Automatically shifts requested dates that fall within the static simulation prompt window
+ * (June 6th, 2026 onwards) to line up with the current actual system date as "today".
+ */
+function mapSimulationDate(parsedDate, timeZone) {
+  if (!parsedDate || isNaN(parsedDate.getTime())) return parsedDate;
+
+  const dateOnlyStr = formatInTimeZone(parsedDate, timeZone, 'yyyy-MM-dd');
+  const dateOnlyStart = fromZonedTime(dateOnlyStr + 'T00:00:00', timeZone);
+
+  const refBaseDate = fromZonedTime('2026-06-06T00:00:00', timeZone);
+  const nowLocal = toZonedTime(getCurrentTime(), timeZone);
+  const todayStart = fromZonedTime(formatInTimeZone(nowLocal, timeZone, 'yyyy-MM-dd') + 'T00:00:00', timeZone);
+
+  // If the parsed date falls in the static training prompt window (June 6th, 2026 up to today's date)
+  if (dateOnlyStart >= refBaseDate && dateOnlyStart < todayStart) {
+    const todayShift = todayStart.getTime() - refBaseDate.getTime();
+    const finalDate = new Date(parsedDate.getTime() + todayShift);
+    console.log(`🔄 [Simulation Date Mapping] Shifting static reference date ${formatInTimeZone(parsedDate, timeZone, 'yyyy-MM-dd HH:mm')} to current relative date: ${formatInTimeZone(finalDate, timeZone, 'yyyy-MM-dd HH:mm')}`);
+    return finalDate;
+  }
+  return parsedDate;
+}
+
+
+/**
  * Checks if a given date falls within business hours:
  * Morning: 9:00 AM - 1:00 PM (starts 9am-12pm)
  * Evening: 3:00 PM - 8:00 PM (starts 3pm-7pm)
@@ -179,7 +205,7 @@ function parseDateTimeInZone(dateTimeStr, timeZone) {
  */
 function validateWorkingHours(date) {
   // Prevent booking times that have already passed
-  if (date < new Date()) {
+  if (date < getCurrentTime()) {
     return {
       isValid: false,
       reason: "The requested time has already passed. Please select a future date and time."
@@ -256,13 +282,43 @@ app.get('/api/webhook/available-slots', async (req, res) => {
 
   // Default to today if no date provided
   if (!date) {
-    const nowLocal = toZonedTime(new Date(), CLINIC_TIMEZONE);
+    const nowLocal = toZonedTime(getCurrentTime(), CLINIC_TIMEZONE);
     date = format(nowLocal, 'yyyy-MM-dd');
   } else {
-    // Normalize if DD/MM/YYYY is passed
-    const match = date.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-    if (match) {
-      date = `${match[3]}-${match[2]}-${match[1]}`;
+    try {
+      let parsedDate;
+      const match = date.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+      if (match) {
+        parsedDate = fromZonedTime(`${match[3]}-${match[2]}-${match[1]}T00:00:00`, CLINIC_TIMEZONE);
+      } else {
+        // Clean ordinal suffixes like "th", "st", "nd", "rd" (e.g. "June 7th, 2026" -> "June 7, 2026")
+        const cleanDateStr = date.replace(/(\d+)(st|nd|rd|th)/i, '$1');
+        const isoMatch = cleanDateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+        if (isoMatch) {
+          parsedDate = fromZonedTime(`${cleanDateStr}T00:00:00`, CLINIC_TIMEZONE);
+        } else {
+          const rawParsed = new Date(cleanDateStr);
+          if (!isNaN(rawParsed.getTime())) {
+            const yyyy = rawParsed.getFullYear();
+            const mm = String(rawParsed.getMonth() + 1).padStart(2, '0');
+            const dd = String(rawParsed.getDate()).padStart(2, '0');
+            parsedDate = fromZonedTime(`${yyyy}-${mm}-${dd}T00:00:00`, CLINIC_TIMEZONE);
+          }
+        }
+      }
+
+      if (parsedDate && !isNaN(parsedDate.getTime())) {
+        parsedDate = mapSimulationDate(parsedDate, CLINIC_TIMEZONE);
+        date = formatInTimeZone(parsedDate, CLINIC_TIMEZONE, 'yyyy-MM-dd');
+      } else {
+        console.warn(`⚠️ Warning: Could not parse slot date "${date}". Falling back to current date.`);
+        const nowLocal = toZonedTime(getCurrentTime(), CLINIC_TIMEZONE);
+        date = formatInTimeZone(nowLocal, CLINIC_TIMEZONE, 'yyyy-MM-dd');
+      }
+    } catch (err) {
+      console.error('Error parsing input date:', err);
+      const nowLocal = toZonedTime(getCurrentTime(), CLINIC_TIMEZONE);
+      date = formatInTimeZone(nowLocal, CLINIC_TIMEZONE, 'yyyy-MM-dd');
     }
   }
 
@@ -277,7 +333,7 @@ app.get('/api/webhook/available-slots', async (req, res) => {
         const slotStart = fromZonedTime(slotStartStr, CLINIC_TIMEZONE);
         const slotEnd = new Date(slotStart.getTime() + 60 * 60 * 1000); // 1 hour slots
 
-        const isPast = slotStart < new Date();
+        const isPast = slotStart < getCurrentTime();
         const isBooked = isPast || await checkOverlap(slotStart, slotEnd);
         const label = formatInTimeZone(slotStart, CLINIC_TIMEZONE, 'hh:mm a');
 
@@ -318,6 +374,71 @@ app.get('/api/webhook/available-slots', async (req, res) => {
 /**
  * Endpoint to fetch the currently active ElevenLabs Agent ID
  */
+/**
+ * Endpoint to fetch the ElevenLabs System Prompt with dynamic real-time dates
+ */
+app.get('/api/agent-prompt', (req, res) => {
+  const today = toZonedTime(new Date(), CLINIC_TIMEZONE);
+  const tomorrow = new Date(today);
+  tomorrow.setDate(today.getDate() + 1);
+
+  const formattedToday = formatInTimeZone(today, CLINIC_TIMEZONE, 'MMMM do, yyyy'); // e.g. "June 12th, 2026"
+  const formattedTodayShort = formatInTimeZone(today, CLINIC_TIMEZONE, 'dd/MM/yyyy'); // e.g. "12/06/2026"
+  const formattedTomorrow = formatInTimeZone(tomorrow, CLINIC_TIMEZONE, 'MMMM do, yyyy');
+  const formattedTomorrowShort = formatInTimeZone(tomorrow, CLINIC_TIMEZONE, 'dd/MM/yyyy');
+
+  const basePrompt = `You are Clara, the friendly, professional, and efficient AI receptionist for the Pearl Dental Hospital. Your goal is to guide patients to book dental appointments and answer basic queries. 
+
+Reference Date Info:
+- Today's date is ${formattedToday} (${formattedTodayShort}).
+- Tomorrow's date is ${formattedTomorrow} (${formattedTomorrowShort}).
+Use these as reference points to calculate dates.
+
+Strict Sequential Conversation Flow:
+
+1. Greet the Patient & Ask for Name (First Message):
+   Always start the call with: "Hello! Welcome to Pearl Dental Hospital. My name is Clara, and I am your digital receptionist today. I can help you check available appointment times and book your dental visit. Who do I have the pleasure of speaking with?"
+
+2. Acknowledge Name & Ask for Reason (Step 2):
+   - Once they give their name, greet them: "Hi [Name]! Which reason do you want to book for?"
+   - Wait for the patient to explain their reason (e.g. tooth pain, routine checkup).
+
+3. Check Date & Choose Time (Step 3):
+   - Ask: "Would you like to book an appointment for today, or select another date?"
+   
+   - **Step A (Check Today)**: If the user requests "today", immediately call the "get_available_slots" tool for today's date (${formattedTodayShort}).
+     - If times are available: List the free times to the user (grouped into Morning: 9:00 AM - 1:00 PM and Evening: 3:00 PM - 8:00 PM).
+     - If today is fully booked: Say exactly: "Today not available for any time, So did you prepare any other time?" and suggest tomorrow.
+   
+   - **Step B (Check Tomorrow)**: If the user then says "tomorrow" or if today was booked, call the "get_available_slots" tool for tomorrow's date (${formattedTomorrowShort}).
+     - If times are available: List tomorrow's available times.
+     - If tomorrow is also fully booked: Say exactly: "Tomorrow all times are booked, I'll tell you the next free dates. You select the date from there."
+   
+   - **Step C (Check Next Free Dates)**: If tomorrow is also booked, call the "get_available_slots" tool for subsequent days to find the next available slots, list those dates and times, and let the patient select one.
+   
+   - Wait for the patient to pick their preferred time slot.
+
+4. Collect Phone Number (Step 4):
+   - Once the appointment time is selected, ask: "Please give me your phone number and I confirm your Booking."
+   - Wait for the patient to provide their phone number.
+
+5. Confirm the Booking (Step 5):
+   - Call the "schedule_appointment" tool. You MUST format the dateTime parameter strictly as DD/MM/YYYY hh:mm AM/PM (e.g., 09/06/2026 10:00 AM).
+   - Once the tool returns "success", say: "Your Booking was Confirmed successfully!" and summarize their details:
+     - Name: [Name]
+     - Reason: [Reason]
+     - Phone: [Phone]
+     - Booking Date & Time: [Booking Date & Time]
+
+6. End Call:
+   - When the user says thanks, deliver a warm closing wish and end the call.`;
+
+  return res.json({ status: 'success', prompt: basePrompt });
+});
+
+/**
+ * Endpoint to fetch the currently active ElevenLabs Agent ID
+ */
 app.get('/api/agent-id', (req, res) => {
   return res.json({ status: 'success', agentId: adminSettings.agentId });
 });
@@ -340,7 +461,7 @@ app.get('/api/admin/settings', (req, res) => {
  */
 app.post('/api/admin/settings', (req, res) => {
   const { agentId, apiKey } = req.body;
-  
+
   adminSettings.agentId = agentId || '';
   adminSettings.apiKey = apiKey || '';
 
@@ -489,6 +610,9 @@ app.post('/api/webhook/book-appointment', async (req, res) => {
       });
     }
 
+    // Map static simulation/mock training dates automatically to relative current dates
+    requestedStart = mapSimulationDate(requestedStart, CLINIC_TIMEZONE);
+
     // A. Validate Working Hours First
     const hoursValidation = validateWorkingHours(requestedStart);
     if (!hoursValidation.isValid) {
@@ -566,14 +690,14 @@ app.post('/api/webhook/book-appointment', async (req, res) => {
     const newBooking = {
       id: `sim_${Date.now()}`,
       summary: `Appointment: ${patientName}`,
-      start: requestedStart ? requestedStart.toISOString() : new Date().toISOString(),
-      end: requestedEnd ? requestedEnd.toISOString() : new Date(Date.now() + 60 * 60 * 1000).toISOString(),
+      start: requestedStart ? requestedStart.toISOString() : getCurrentTime().toISOString(),
+      end: requestedEnd ? requestedEnd.toISOString() : new Date(getCurrentTime().getTime() + 60 * 60 * 1000).toISOString(),
       description: `Phone: ${phoneNumber} | Reason: ${reasonForVisit} (Simulated Booking - Fallback)`
     };
     simulatedBookings.push(newBooking);
     console.log(`✅ [SIMULATION FALLBACK] Scheduled appointment successfully!`);
 
-    const formattedLocalTime = formatInTimeZone(requestedStart || new Date(), CLINIC_TIMEZONE, 'EEEE, MMMM do yyyy h:mm a');
+    const formattedLocalTime = formatInTimeZone(requestedStart || getCurrentTime(), CLINIC_TIMEZONE, 'EEEE, MMMM do yyyy h:mm a');
     return res.json({
       status: 'success',
       message: `Successfully booked a dental checkup for ${patientName} on ${formattedLocalTime}. We look forward to seeing you!`
@@ -873,7 +997,7 @@ app.get('/', (req, res) => {
             
             <div class="form-group">
               <label for="booking-date">1. Pick Date</label>
-              <input type="date" id="booking-date" value="2026-06-09" min="2026-06-01">
+              <input type="date" id="booking-date">
             </div>
 
             <div class="form-group">
@@ -1132,12 +1256,35 @@ Request Body (JSON):
             }
           });
 
+          // Set default date picker value dynamically to today
+          const todayDateObj = new Date();
+          const yyyyVal = todayDateObj.getFullYear();
+          const mmVal = String(todayDateObj.getMonth() + 1).padStart(2, '0');
+          const ddVal = String(todayDateObj.getDate()).padStart(2, '0');
+          const todayISOVal = \`\${yyyyVal}-\${mmVal}-\${ddVal}\`;
+          bookingDate.value = todayISOVal;
+          bookingDate.min = todayISOVal;
+
+          // Fetch and display dynamic agent prompt instructions
+          async function fetchAgentPrompt() {
+            try {
+              const res = await fetch('/api/agent-prompt');
+              const data = await res.json();
+              if (data.status === 'success') {
+                document.getElementById('agent-prompt').textContent = data.prompt;
+              }
+            } catch (error) {
+              console.error('Error fetching agent prompt:', error);
+            }
+          }
+
           // Event listener for date change
           bookingDate.addEventListener('change', fetchAvailableSlots);
 
           // Initial Load
           fetchBookings();
           fetchAvailableSlots();
+          fetchAgentPrompt();
 
           // Poll for bookings update every 5 seconds (especially when booking via voice call)
           setInterval(fetchBookings, 5000);
