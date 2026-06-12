@@ -1232,7 +1232,7 @@ Request Body (JSON):
           const yyyyVal = todayDateObj.getFullYear();
           const mmVal = String(todayDateObj.getMonth() + 1).padStart(2, '0');
           const ddVal = String(todayDateObj.getDate()).padStart(2, '0');
-          const todayISOVal = `${yyyyVal}-${mmVal}-${ddVal}`;
+          const todayISOVal = \`\${yyyyVal}-\${mmVal}-\${ddVal}\`;
           bookingDate.value = todayISOVal;
           bookingDate.min = todayISOVal;
 
