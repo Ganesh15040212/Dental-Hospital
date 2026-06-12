@@ -456,8 +456,8 @@ export default function CallAgentWidget({ isOpen, setIsOpen, mode, setMode }) {
               {/* Chat Status Banner */}
               <div style={{ 
                 display: 'flex', 
-                justify-content: 'space-between', 
-                align-items: 'center', 
+                justifyContent: 'space-between', 
+                alignItems: 'center', 
                 padding: '0.5rem 0.75rem', 
                 borderBottom: '1px solid var(--panel-border)', 
                 fontSize: '0.75rem', 
