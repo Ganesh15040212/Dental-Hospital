@@ -461,7 +461,7 @@ app.get('/api/admin/settings', (req, res) => {
  */
 app.post('/api/admin/settings', (req, res) => {
   const { agentId, apiKey } = req.body;
-  
+
   adminSettings.agentId = agentId || '';
   adminSettings.apiKey = apiKey || '';
 
