@@ -11,6 +11,7 @@ export default function CallAgentWidget({ isOpen, setIsOpen, mode, setMode }) {
   const [messages, setMessages] = useState([]);
   const [inputText, setInputText] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
+  const [pendingMessage, setPendingMessage] = useState('');
   
   const chatEndRef = useRef(null);
   const prevIsOpen = useRef(isOpen);
@@ -225,16 +226,29 @@ export default function CallAgentWidget({ isOpen, setIsOpen, mode, setMode }) {
     }
   };
 
-  const handleSendMessage = (e) => {
+  const handleSendMessage = async (e) => {
     e.preventDefault();
     if (!inputText.trim()) return;
 
-    try {
-      sendUserMessage(inputText);
-      setMessages(prev => [...prev, { role: 'user', text: inputText }]);
-      setInputText('');
-    } catch (err) {
-      console.error('Error sending message:', err);
+    const msgText = inputText;
+    setInputText('');
+
+    if (status === 'connected') {
+      try {
+        sendUserMessage(msgText);
+        setMessages(prev => [...prev, { role: 'user', text: msgText }]);
+      } catch (err) {
+        console.error('Error sending message:', err);
+      }
+    } else {
+      try {
+        // Optimistically display the user's message, queue it, and trigger connection
+        setMessages(prev => [...prev, { role: 'user', text: msgText }]);
+        setPendingMessage(msgText);
+        await handleStart(mode);
+      } catch (err) {
+        console.error('Failed to trigger reconnection on message send:', err);
+      }
     }
   };
 
@@ -249,6 +263,18 @@ export default function CallAgentWidget({ isOpen, setIsOpen, mode, setMode }) {
     }
     prevIsOpen.current = isOpen;
   }, [isOpen]);
+
+  // Automatically send queued message once connection is established
+  useEffect(() => {
+    if (status === 'connected' && pendingMessage) {
+      try {
+        sendUserMessage(pendingMessage);
+        setPendingMessage('');
+      } catch (err) {
+        console.error('Error sending pending message:', err);
+      }
+    }
+  }, [status, pendingMessage]);
 
   // Toggle mode inside the drawer
   const handleToggleMode = async (newMode) => {
@@ -527,21 +553,21 @@ export default function CallAgentWidget({ isOpen, setIsOpen, mode, setMode }) {
               </div>
 
               {/* Black Bordered rounded-rect input container (3rd Image) */}
-              <form onSubmit={handleSendMessage} className="drawer-chat-input-bar" style={{ opacity: status === 'connected' ? 1 : 0.6 }}>
+              <form onSubmit={handleSendMessage} className="drawer-chat-input-bar" style={{ opacity: status === 'connecting' || status === 'disconnecting' ? 0.6 : 1 }}>
                 <input 
                   type="text" 
                   value={inputText}
                   onChange={(e) => setInputText(e.target.value)}
-                  placeholder={status === 'connected' ? "Send a message..." : status === 'connecting' ? "Connecting to Clara..." : "Connect to start chatting..."}
+                  placeholder={status === 'connected' ? "Send a message..." : status === 'connecting' ? "Connecting to Clara..." : "Type a message to connect & chat..."}
                   className="drawer-chat-input-field"
-                  disabled={status !== 'connected'}
+                  disabled={status === 'connecting' || status === 'disconnecting'}
                 />
                 
                 {/* Circular Send Button inside input bar */}
                 <button 
                   type="submit" 
-                  className={`drawer-chat-send-btn ${inputText.trim() && status === 'connected' ? 'active' : ''}`}
-                  disabled={!inputText.trim() || status !== 'connected'}
+                  className={`drawer-chat-send-btn ${inputText.trim() && status !== 'connecting' && status !== 'disconnecting' ? 'active' : ''}`}
+                  disabled={!inputText.trim() || status === 'connecting' || status === 'disconnecting'}
                   title="Send Message"
                 >
                   <ArrowUp size={16} />
