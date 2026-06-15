@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useConversationControls, useConversationStatus } from '@elevenlabs/react';
+import { useConversationControls, useConversationStatus, useConversationClientTool } from '@elevenlabs/react';
 import { Phone, PhoneOff, MessageSquare, ArrowUp, Volume2, MessageCircle, AlertCircle, Calendar, ChevronDown, HeartPulse } from 'lucide-react';
 
 export default function CallAgentWidget({ isOpen, setIsOpen, mode, setMode }) {
@@ -8,9 +8,58 @@ export default function CallAgentWidget({ isOpen, setIsOpen, mode, setMode }) {
   const [agentId, setAgentId] = useState('');
   const [messages, setMessages] = useState([]);
   const [inputText, setInputText] = useState('');
-  
+
   const chatEndRef = useRef(null);
   const prevIsOpen = useRef(isOpen);
+
+  // ── Register Client Tools via the proper SDK hook ────────────────────────
+  // This ensures ElevenLabs can dispatch tool calls to these handlers at all
+  // times, not just during the startSession call.
+  useConversationClientTool('get_available_slots', async (params) => {
+    console.log('[CLIENT TOOL] get_available_slots called with params:', JSON.stringify(params));
+    const date = params.date || params.Date || params.query_date || params.appointment_date || '';
+    if (!date) {
+      console.error('[CLIENT TOOL] get_available_slots: No date param received!', params);
+      return 'Error: No date was provided to the tool. Please try again.';
+    }
+    try {
+      const res = await fetch(`/api/webhook/available-slots?date=${encodeURIComponent(date)}`);
+      const data = await res.json();
+      console.log('[CLIENT TOOL] get_available_slots API response:', JSON.stringify(data));
+      const morning = data.morning ? data.morning.filter(s => s.available).map(s => s.time).join(', ') : '';
+      const evening = data.evening ? data.evening.filter(s => s.available).map(s => s.time).join(', ') : '';
+      if (!morning && !evening) {
+        return `No slots are available on ${date}. This date is fully booked.`;
+      }
+      let responseText = `Available slots on ${date}:`;
+      if (morning) responseText += ` Morning session slots: ${morning}.`;
+      if (evening) responseText += ` Evening session slots: ${evening}.`;
+      console.log('[CLIENT TOOL] get_available_slots returning:', responseText);
+      return responseText;
+    } catch (err) {
+      console.error('[CLIENT TOOL] get_available_slots fetch failed:', err);
+      return `Failed to retrieve available slots for ${date}. Please try again.`;
+    }
+  });
+
+  useConversationClientTool('schedule_appointment', async (params) => {
+    console.log('[CLIENT TOOL] schedule_appointment called with params:', JSON.stringify(params));
+    const { patientName, phoneNumber, reasonForVisit, dateTime } = params;
+    try {
+      const res = await fetch('/api/webhook/book-appointment', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ patientName, phoneNumber, reasonForVisit, dateTime })
+      });
+      const data = await res.json();
+      console.log('[CLIENT TOOL] schedule_appointment API response:', JSON.stringify(data));
+      return data;
+    } catch (err) {
+      console.error('[CLIENT TOOL] schedule_appointment fetch failed:', err);
+      return { status: 'error', message: 'Failed to book appointment.' };
+    }
+  });
+  // ─────────────────────────────────────────────────────────────────────────
 
   // Fetch Agent ID dynamically from backend config on mount
   useEffect(() => {
@@ -43,42 +92,15 @@ export default function CallAgentWidget({ isOpen, setIsOpen, mode, setMode }) {
       return;
     }
 
-    const clientTools = {
-      get_available_slots: async ({ date }) => {
-        try {
-          const res = await fetch(`/api/webhook/available-slots?date=${date}`);
-          const data = await res.json();
-          return data;
-        } catch (err) {
-          console.error('get_available_slots client tool failed:', err);
-          return { status: 'error', message: 'Failed to retrieve slots.' };
-        }
-      },
-      schedule_appointment: async ({ patientName, phoneNumber, reasonForVisit, dateTime }) => {
-        try {
-          const res = await fetch('/api/webhook/book-appointment', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ patientName, phoneNumber, reasonForVisit, dateTime })
-          });
-          const data = await res.json();
-          return data;
-        } catch (err) {
-          console.error('schedule_appointment client tool failed:', err);
-          return { status: 'error', message: 'Failed to book appointment.' };
-        }
-      }
-    };
 
     setMessages([]);
 
     try {
       if (targetMode === 'voice') {
-        // Explicitly request microphone access for voice call
         await navigator.mediaDevices.getUserMedia({ audio: true });
       }
 
-      // Fetch session token/URL from backend proxy using secure backend credentials
+      // Fetch session token/URL from backend proxy
       let signedUrl = null;
       let conversationToken = null;
       try {
@@ -101,8 +123,9 @@ export default function CallAgentWidget({ isOpen, setIsOpen, mode, setMode }) {
         console.warn('Failed to fetch session authorization, falling back to agentId directly:', tokenErr);
       }
 
+      // NOTE: clientTools are registered via useConversationClientTool hooks above.
+      // Do NOT pass clientTools here — the hook registry handles all tool dispatch.
       const sessionParams = {
-        clientTools,
         onMessage: (msg) => {
           const role = msg.role === 'user' ? 'user' : 'assistant';
           const text = msg.message || msg.text || '';
@@ -185,14 +208,14 @@ export default function CallAgentWidget({ isOpen, setIsOpen, mode, setMode }) {
   // Toggle mode inside the drawer
   const handleToggleMode = async (newMode) => {
     if (newMode === mode) return;
-    
+
     // If running, stop current session first
     if (status === 'connected' || status === 'connecting') {
       await handleEnd();
     }
-    
+
     setMode(newMode);
-    
+
     // Automatically start session in the new mode
     setTimeout(() => {
       handleStart(newMode);
@@ -222,10 +245,10 @@ export default function CallAgentWidget({ isOpen, setIsOpen, mode, setMode }) {
         <div className="initial-pill">
           <div className="initial-pill-header">
             {/* Glowing circle representation */}
-            <div 
+            <div
               style={{
-                width: '24px', 
-                height: '24px', 
+                width: '24px',
+                height: '24px',
                 borderRadius: '50%',
                 background: 'radial-gradient(circle, #22d3ee 0%, #3b82f6 60%, rgba(79,70,229,0.2) 100%)',
                 animation: 'orbBreathing 3s ease-in-out infinite',
@@ -237,7 +260,7 @@ export default function CallAgentWidget({ isOpen, setIsOpen, mode, setMode }) {
 
           <div className="initial-pill-controls">
             {/* Wide Capsule Black Call Button */}
-            <button 
+            <button
               onClick={() => handleExpand('voice')}
               className="capsule-call-btn"
             >
@@ -246,7 +269,7 @@ export default function CallAgentWidget({ isOpen, setIsOpen, mode, setMode }) {
             </button>
 
             {/* Circular Chat Toggle Button */}
-            <button 
+            <button
               onClick={() => handleExpand('chat')}
               className="round-chat-btn"
               title="Start a chat"
@@ -260,7 +283,7 @@ export default function CallAgentWidget({ isOpen, setIsOpen, mode, setMode }) {
            2. EXPANDED DRAWER STATE (3rd Image)
            ========================================== */
         <div className="expanded-drawer">
-          
+
           {/* Header */}
           <div className="drawer-header">
             <div className="drawer-title-group">
@@ -270,14 +293,14 @@ export default function CallAgentWidget({ isOpen, setIsOpen, mode, setMode }) {
 
             {/* Toggle tabs */}
             <div className="chat-mode-toggle">
-              <button 
+              <button
                 onClick={() => handleToggleMode('voice')}
                 className={`toggle-btn ${mode === 'voice' ? 'active' : ''}`}
               >
                 <Volume2 size={11} />
                 <span>Voice</span>
               </button>
-              <button 
+              <button
                 onClick={() => handleToggleMode('chat')}
                 className={`toggle-btn ${mode === 'chat' ? 'active' : ''}`}
               >
@@ -291,7 +314,7 @@ export default function CallAgentWidget({ isOpen, setIsOpen, mode, setMode }) {
           {mode === 'voice' ? (
             /* Voice Mode Body (Siri visualizer & call toggle button) */
             <div className="siri-orb-container">
-              
+
               <div className="siri-orb-wrapper">
                 {/* Concentric rings waves if active */}
                 {status === 'connected' && (
@@ -302,14 +325,13 @@ export default function CallAgentWidget({ isOpen, setIsOpen, mode, setMode }) {
                 )}
 
                 {/* Main Glowing Orb */}
-                <div 
-                  className={`siri-orb ${
-                    status === 'connected' 
-                      ? 'active' 
-                      : status === 'connecting' 
-                        ? 'connecting' 
-                        : 'idle'
-                  }`}
+                <div
+                  className={`siri-orb ${status === 'connected'
+                    ? 'active'
+                    : status === 'connecting'
+                      ? 'connecting'
+                      : 'idle'
+                    }`}
                 >
                   {/* EQ bars inside active voice orb */}
                   {status === 'connected' && (
@@ -322,7 +344,7 @@ export default function CallAgentWidget({ isOpen, setIsOpen, mode, setMode }) {
                 </div>
 
                 {/* Circular Black Call Toggle Button overlapping bottom of the orb */}
-                <button 
+                <button
                   onClick={status === 'connected' || status === 'connecting' ? handleEnd : () => handleStart('voice')}
                   className="siri-end-call-btn"
                   title={status === 'connected' || status === 'connecting' ? "End Call" : "Start Call"}
@@ -355,7 +377,7 @@ export default function CallAgentWidget({ isOpen, setIsOpen, mode, setMode }) {
                     </>
                   )}
                 </div>
-                
+
                 <p className="drawer-call-subtext">
                   {status === 'connected'
                     ? 'Speak naturally to book dental slots or ask queries. Click the button to hang up.'
@@ -405,17 +427,17 @@ export default function CallAgentWidget({ isOpen, setIsOpen, mode, setMode }) {
 
               {/* Black Bordered rounded-rect input container (3rd Image) */}
               <form onSubmit={handleSendMessage} className="drawer-chat-input-bar">
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   value={inputText}
                   onChange={(e) => setInputText(e.target.value)}
                   placeholder="Send a message..."
                   className="drawer-chat-input-field"
                 />
-                
+
                 {/* Circular Send Button inside input bar */}
-                <button 
-                  type="submit" 
+                <button
+                  type="submit"
                   className={`drawer-chat-send-btn ${inputText.trim() ? 'active' : ''}`}
                   disabled={!inputText.trim()}
                   title="Send Message"
@@ -428,7 +450,7 @@ export default function CallAgentWidget({ isOpen, setIsOpen, mode, setMode }) {
 
           {/* Drawer footer containing the circular collapse button */}
           <div className="drawer-footer">
-            <button 
+            <button
               onClick={handleCollapse}
               className="round-collapse-btn"
               title="Collapse Panel"

@@ -52,6 +52,19 @@ const credentialsPath = path.resolve('./google-credentials.json');
 if (process.env.MOCK_MODE === 'true') {
   console.log('ℹ️ Forcing Simulation Mode via MOCK_MODE env variable.');
   isMockMode = true;
+} else if (process.env.GOOGLE_CREDENTIALS_JSON) {
+  try {
+    const credentials = JSON.parse(process.env.GOOGLE_CREDENTIALS_JSON);
+    const auth = new google.auth.GoogleAuth({
+      credentials,
+      scopes: ['https://www.googleapis.com/auth/calendar'],
+    });
+    calendar = google.calendar({ version: 'v3', auth });
+    console.log('✅ Google Calendar client initialized successfully from GOOGLE_CREDENTIALS_JSON env variable.');
+  } catch (error) {
+    console.error('❌ Failed to initialize Google Calendar client from GOOGLE_CREDENTIALS_JSON. Defaulting to Simulation Mode.', error);
+    isMockMode = true;
+  }
 } else if (fs.existsSync(credentialsPath)) {
   try {
     const auth = new google.auth.GoogleAuth({
@@ -65,71 +78,73 @@ if (process.env.MOCK_MODE === 'true') {
     isMockMode = true;
   }
 } else {
-  console.warn('⚠️ WARNING: "google-credentials.json" not found. Running server in SIMULATION MODE.');
+  console.warn('⚠️ WARNING: "google-credentials.json" not found and GOOGLE_CREDENTIALS_JSON not configured. Running server in SIMULATION MODE.');
   console.warn('   Bookings will be validated but simulated in-memory rather than written to Google Calendar.');
   isMockMode = true;
 }
 
+// Helper to format date relative to today (YYYY-MM-DD)
+function offsetDateStr(daysOffset) {
+  const today = new Date();
+  const d = new Date(today);
+  d.setDate(today.getDate() + daysOffset);
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 // In-memory array initialized with predefined booked appointments
-// Predefined dates: June 7, 9, 10, 13 of 2026.
-const simulatedBookings = [
-  {
-    id: 'pre_1',
-    summary: 'Appointment: Ganesh',
-    start: fromZonedTime('2026-06-07T10:00:00', CLINIC_TIMEZONE).toISOString(),
-    end: fromZonedTime('2026-06-07T11:00:00', CLINIC_TIMEZONE).toISOString(),
-    description: 'Phone: 8433198543 | Reason: Tooth pain'
-  },
-  {
-    id: 'pre_2',
-    summary: 'Appointment: John Doe',
-    start: fromZonedTime('2026-06-07T16:00:00', CLINIC_TIMEZONE).toISOString(),
-    end: fromZonedTime('2026-06-07T17:00:00', CLINIC_TIMEZONE).toISOString(),
-    description: 'Phone: +15550100 | Reason: Routine Checkup'
-  },
-  {
-    id: 'pre_3',
-    summary: 'Appointment: Sarah Connor',
-    start: fromZonedTime('2026-06-09T09:00:00', CLINIC_TIMEZONE).toISOString(),
-    end: fromZonedTime('2026-06-09T10:00:00', CLINIC_TIMEZONE).toISOString(),
-    description: 'Phone: +15550200 | Reason: Cleaning'
-  },
-  {
-    id: 'pre_4',
-    summary: 'Appointment: Bruce Wayne',
-    start: fromZonedTime('2026-06-09T15:00:00', CLINIC_TIMEZONE).toISOString(),
-    end: fromZonedTime('2026-06-09T16:00:00', CLINIC_TIMEZONE).toISOString(),
-    description: 'Phone: +15550300 | Reason: Consultation'
-  },
-  {
-    id: 'pre_5',
-    summary: 'Appointment: Peter Parker',
-    start: fromZonedTime('2026-06-10T11:00:00', CLINIC_TIMEZONE).toISOString(),
-    end: fromZonedTime('2026-06-10T12:00:00', CLINIC_TIMEZONE).toISOString(),
-    description: 'Phone: +15550400 | Reason: Toothache'
-  },
-  {
-    id: 'pre_6',
-    summary: 'Appointment: Clark Kent',
-    start: fromZonedTime('2026-06-10T17:00:00', CLINIC_TIMEZONE).toISOString(),
-    end: fromZonedTime('2026-06-10T18:00:00', CLINIC_TIMEZONE).toISOString(),
-    description: 'Phone: +15550500 | Reason: Root Canal'
-  },
-  {
-    id: 'pre_7',
-    summary: 'Appointment: Diana Prince',
-    start: fromZonedTime('2026-06-13T12:00:00', CLINIC_TIMEZONE).toISOString(),
-    end: fromZonedTime('2026-06-13T13:00:00', CLINIC_TIMEZONE).toISOString(),
-    description: 'Phone: +15550600 | Reason: Consultation'
-  },
-  {
-    id: 'pre_8',
-    summary: 'Appointment: Tony Stark',
-    start: fromZonedTime('2026-06-13T19:00:00', CLINIC_TIMEZONE).toISOString(),
-    end: fromZonedTime('2026-06-13T20:00:00', CLINIC_TIMEZONE).toISOString(),
-    description: 'Phone: +15550700 | Reason: Teeth whitening'
+// Dates are dynamically offset relative to today's live date to keep mock data relevant.
+const simulatedBookings = [];
+
+// Global In-Memory Bookings Cache
+let bookingsCache = [];
+
+/**
+ * Synchronizes the bookings cache with Google Calendar or simulated bookings.
+ * Fetches events from today (start of day) up to 30 days in the future.
+ */
+async function syncBookingsCache() {
+  if (isMockMode) {
+    bookingsCache = simulatedBookings;
+    return;
   }
-];
+  if (!calendar) {
+    console.warn('⚠️ [CACHE] Cannot sync: Google Calendar client is not initialized.');
+    bookingsCache = simulatedBookings;
+    return;
+  }
+  try {
+    const now = getCurrentTime();
+    const dayStart = new Date(now);
+    dayStart.setHours(0, 0, 0, 0);
+    const dayEnd = new Date(dayStart.getTime() + 30 * 24 * 60 * 60 * 1000); // 30 days in future
+
+    const response = await calendar.events.list({
+      calendarId: GOOGLE_CALENDAR_ID,
+      timeMin: dayStart.toISOString(),
+      timeMax: dayEnd.toISOString(),
+      singleEvents: true,
+      orderBy: 'startTime',
+    });
+
+    const events = response.data.items || [];
+    bookingsCache = events.map(e => ({
+      id: e.id,
+      summary: e.summary,
+      start: e.start.dateTime || e.start.date,
+      end: e.end.dateTime || e.end.date,
+      description: e.description || '',
+      transparency: e.transparency || 'opaque'
+    }));
+    console.log(`✅ [CACHE] Synced ${bookingsCache.length} bookings from Google Calendar.`);
+  } catch (error) {
+    console.error('❌ [CACHE] Failed to sync bookings cache:', error);
+  }
+}
+
+
 
 // ============================================================================
 // 2. Helper Functions: Timezone-Safe Parsing, Working Hours & Overlaps
@@ -137,14 +152,26 @@ const simulatedBookings = [
 
 /**
  * Returns the current date-time.
- * In Mock/Simulation mode, treats the current time as June 5, 2026 at 08:00 AM local time
- * to match the mock environment setup and ElevenLabs testing parameters.
+ * Always returns the live current date-time.
  */
 function getCurrentTime() {
-  if (isMockMode) {
-    return fromZonedTime('2026-06-05T08:00:00', CLINIC_TIMEZONE);
-  }
   return new Date();
+}
+
+/**
+ * Aligns the parsed date's year to the system's current year.
+ * Prevents clock desync issues where cloud agents (like ElevenLabs) send the current real year
+ * while the local server runs on a simulated clock (e.g. 2026).
+ */
+function alignYearToSystem(parsedDate) {
+  const now = getCurrentTime();
+  const systemYear = now.getFullYear();
+
+  if (parsedDate.getMonth() < now.getMonth()) {
+    parsedDate.setFullYear(systemYear + 1);
+  } else {
+    parsedDate.setFullYear(systemYear);
+  }
 }
 
 /**
@@ -176,11 +203,17 @@ function parseDateTimeInZone(dateTimeStr, timeZone) {
   }
 
   const hasOffset = /Z$|[+-]\d{2}:?\d{2}$/.test(dateTimeStr);
+  let parsedDate;
   if (hasOffset) {
-    return new Date(dateTimeStr);
+    parsedDate = new Date(dateTimeStr);
   } else {
-    return fromZonedTime(dateTimeStr, timeZone);
+    parsedDate = fromZonedTime(dateTimeStr, timeZone);
   }
+
+  if (parsedDate && !isNaN(parsedDate.getTime())) {
+    alignYearToSystem(parsedDate);
+  }
+  return parsedDate;
 }
 
 /**
@@ -224,36 +257,13 @@ function validateWorkingHours(date) {
  * Checks if the requested slot overlaps with any existing booking
  */
 async function checkOverlap(startTime, endTime) {
-  if (isMockMode) {
-    const overlap = simulatedBookings.some(booking => {
-      const bookStart = new Date(booking.start);
-      const bookEnd = new Date(booking.end);
-      return (startTime < bookEnd && endTime > bookStart);
-    });
-    return overlap;
-  }
-
-  try {
-    const response = await calendar.events.list({
-      calendarId: GOOGLE_CALENDAR_ID,
-      timeMin: startTime.toISOString(),
-      timeMax: endTime.toISOString(),
-      singleEvents: true,
-      orderBy: 'startTime',
-    });
-
-    const events = response.data.items || [];
-    return events.length > 0;
-  } catch (error) {
-    console.error('Error fetching calendar events for overlap check:', error);
-    console.warn('⚠️ Google API request failed. Falling back to Simulation/Mock Mode for this check.');
-    const overlap = simulatedBookings.some(booking => {
-      const bookStart = new Date(booking.start);
-      const bookEnd = new Date(booking.end);
-      return (startTime < bookEnd && endTime > bookStart);
-    });
-    return overlap;
-  }
+  const overlap = bookingsCache.some(booking => {
+    if (booking.transparency === 'transparent') return false;
+    const bookStart = new Date(booking.start);
+    const bookEnd = new Date(booking.end);
+    return (startTime < bookEnd && endTime > bookStart);
+  });
+  return overlap;
 }
 
 // ============================================================================
@@ -266,50 +276,72 @@ async function checkOverlap(startTime, endTime) {
 app.get('/api/webhook/available-slots', async (req, res) => {
   let { date } = req.query;
 
+  console.log(`\n🔍 [slots webhook] Incoming request for date: "${date}"`);
+
   // Default to today if no date provided
   if (!date) {
-    const nowLocal = toZonedTime(getCurrentTime(), CLINIC_TIMEZONE);
-    date = format(nowLocal, 'yyyy-MM-dd');
+    date = formatInTimeZone(getCurrentTime(), CLINIC_TIMEZONE, 'yyyy-MM-dd');
   } else {
     try {
       let parsedDate;
-      const match = date.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
-      if (match) {
-        parsedDate = fromZonedTime(`${match[3]}-${match[2]}-${match[1]}T00:00:00`, CLINIC_TIMEZONE);
+      const lowerDate = date.toLowerCase().trim();
+      if (lowerDate === 'today') {
+        parsedDate = getCurrentTime();
+      } else if (lowerDate === 'tomorrow') {
+        parsedDate = new Date(getCurrentTime().getTime() + 24 * 60 * 60 * 1000);
       } else {
-        // Clean ordinal suffixes like "th", "st", "nd", "rd" (e.g. "June 7th, 2026" -> "June 7, 2026")
-        const cleanDateStr = date.replace(/(\d+)(st|nd|rd|th)/i, '$1');
-        const isoMatch = cleanDateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-        if (isoMatch) {
-          parsedDate = fromZonedTime(`${cleanDateStr}T00:00:00`, CLINIC_TIMEZONE);
+        const match = date.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+        if (match) {
+          parsedDate = fromZonedTime(`${match[3]}-${match[2]}-${match[1]}T00:00:00`, CLINIC_TIMEZONE);
         } else {
-          const rawParsed = new Date(cleanDateStr);
-          if (!isNaN(rawParsed.getTime())) {
-            const yyyy = rawParsed.getFullYear();
-            const mm = String(rawParsed.getMonth() + 1).padStart(2, '0');
-            const dd = String(rawParsed.getDate()).padStart(2, '0');
-            parsedDate = fromZonedTime(`${yyyy}-${mm}-${dd}T00:00:00`, CLINIC_TIMEZONE);
+          // Clean ordinal suffixes like "th", "st", "nd", "rd" (e.g. "June 7th, 2026" -> "June 7, 2026")
+          const cleanDateStr = date.replace(/(\d+)(st|nd|rd|th)/i, '$1');
+          const isoMatch = cleanDateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+          if (isoMatch) {
+            parsedDate = fromZonedTime(`${cleanDateStr}T00:00:00`, CLINIC_TIMEZONE);
+          } else {
+            const rawParsed = new Date(cleanDateStr);
+            if (!isNaN(rawParsed.getTime())) {
+              const yyyy = rawParsed.getFullYear();
+              const mm = String(rawParsed.getMonth() + 1).padStart(2, '0');
+              const dd = String(rawParsed.getDate()).padStart(2, '0');
+              parsedDate = fromZonedTime(`${yyyy}-${mm}-${dd}T00:00:00`, CLINIC_TIMEZONE);
+            }
           }
         }
       }
 
       if (parsedDate && !isNaN(parsedDate.getTime())) {
+        alignYearToSystem(parsedDate);
         date = formatInTimeZone(parsedDate, CLINIC_TIMEZONE, 'yyyy-MM-dd');
       } else {
         console.warn(`⚠️ Warning: Could not parse slot date "${date}". Falling back to current date.`);
-        const nowLocal = toZonedTime(getCurrentTime(), CLINIC_TIMEZONE);
-        date = formatInTimeZone(nowLocal, CLINIC_TIMEZONE, 'yyyy-MM-dd');
+        date = formatInTimeZone(getCurrentTime(), CLINIC_TIMEZONE, 'yyyy-MM-dd');
       }
     } catch (err) {
       console.error('Error parsing input date:', err);
-      const nowLocal = toZonedTime(getCurrentTime(), CLINIC_TIMEZONE);
-      date = formatInTimeZone(nowLocal, CLINIC_TIMEZONE, 'yyyy-MM-dd');
+      date = formatInTimeZone(getCurrentTime(), CLINIC_TIMEZONE, 'yyyy-MM-dd');
     }
   }
+
+  console.log(`   [slots webhook] Resolved query date: "${date}"`);
 
   try {
     const morningSlots = ['09:00', '10:00', '11:00', '12:00'];
     const eveningSlots = ['15:00', '16:00', '17:00', '18:00', '19:00'];
+
+    const dayEnd = fromZonedTime(`${date}T23:59:59`, CLINIC_TIMEZONE);
+    if (dayEnd < getCurrentTime()) {
+      return res.json({
+        status: 'success',
+        date,
+        timezone: CLINIC_TIMEZONE,
+        available: false,
+        message: `No slots are available on ${date}. This date is in the past.`,
+        morning: [],
+        evening: []
+      });
+    }
 
     const checkSlotsAvailability = async (slotsList) => {
       const results = [];
@@ -337,10 +369,26 @@ app.get('/api/webhook/available-slots', async (req, res) => {
     const morning = await checkSlotsAvailability(morningSlots);
     const evening = await checkSlotsAvailability(eveningSlots);
 
+    const hasMorning = morning && morning.length > 0;
+    const hasEvening = evening && evening.length > 0;
+    const available = hasMorning || hasEvening;
+
+    const morningText = hasMorning ? morning.map(s => s.time).join(', ') : '';
+    const eveningText = hasEvening ? evening.map(s => s.time).join(', ') : '';
+
+    let message = `No slots are available on ${date}. Today is fully booked.`;
+    if (available) {
+      message = `Available slots on ${date}:`;
+      if (hasMorning) message += ` Morning session slots: ${morningText}.`;
+      if (hasEvening) message += ` Evening session slots: ${eveningText}.`;
+    }
+
     return res.json({
       status: 'success',
       date,
       timezone: CLINIC_TIMEZONE,
+      available,
+      message,
       morning,
       evening
     });
@@ -381,7 +429,7 @@ app.get('/api/admin/settings', (req, res) => {
  */
 app.post('/api/admin/settings', (req, res) => {
   const { agentId, apiKey } = req.body;
-  
+
   adminSettings.agentId = agentId || '';
   adminSettings.apiKey = apiKey || '';
 
@@ -471,34 +519,11 @@ app.post('/api/signed-url', async (req, res) => {
  * Endpoint to fetch all active bookings
  */
 app.get('/api/bookings', async (req, res) => {
-  if (isMockMode) {
-    const sorted = [...simulatedBookings].sort((a, b) => new Date(a.start) - new Date(b.start));
-    return res.json({ status: 'success', bookings: sorted });
-  }
-
-  try {
-    const response = await calendar.events.list({
-      calendarId: GOOGLE_CALENDAR_ID,
-      timeMin: new Date().toISOString(),
-      singleEvents: true,
-      orderBy: 'startTime',
-      maxResults: 20
-    });
-    const events = response.data.items || [];
-    const bookings = events.map(e => ({
-      id: e.id,
-      summary: e.summary,
-      start: e.start.dateTime || e.start.date,
-      end: e.end.dateTime || e.end.date,
-      description: e.description || ''
-    }));
-    return res.json({ status: 'success', bookings });
-  } catch (error) {
-    console.error('Error fetching calendar bookings:', error);
-    console.warn('⚠️ Google API request failed. Falling back to Simulation/Mock Mode for this request.');
-    const sorted = [...simulatedBookings].sort((a, b) => new Date(a.start) - new Date(b.start));
-    return res.json({ status: 'success', bookings: sorted });
-  }
+  const now = getCurrentTime();
+  const sorted = bookingsCache
+    .filter(b => new Date(b.end) > now)
+    .sort((a, b) => new Date(a.start) - new Date(b.start));
+  return res.json({ status: 'success', bookings: sorted });
 });
 
 /**
@@ -565,6 +590,7 @@ app.post('/api/webhook/book-appointment', async (req, res) => {
         description: `Phone: ${phoneNumber} | Reason: ${reasonForVisit} (Simulated Booking)`
       };
       simulatedBookings.push(newBooking);
+      bookingsCache.push(newBooking);
       console.log(`✅ [SIMULATION] Scheduled appointment successfully!`);
 
       return res.json({
@@ -591,6 +617,16 @@ app.post('/api/webhook/book-appointment', async (req, res) => {
         resource: event,
       });
 
+      const newEvent = {
+        id: result.data.id || `sim_${Date.now()}`,
+        summary: event.summary,
+        start: requestedStart.toISOString(),
+        end: requestedEnd.toISOString(),
+        description: event.description,
+        transparency: 'opaque'
+      };
+      bookingsCache.push(newEvent);
+
       console.log(`✅ Google Calendar event scheduled: ${result.data.htmlLink}`);
       return res.json({
         status: 'success',
@@ -612,6 +648,7 @@ app.post('/api/webhook/book-appointment', async (req, res) => {
       description: `Phone: ${phoneNumber} | Reason: ${reasonForVisit} (Simulated Booking - Fallback)`
     };
     simulatedBookings.push(newBooking);
+    bookingsCache.push(newBooking);
     console.log(`✅ [SIMULATION FALLBACK] Scheduled appointment successfully!`);
 
     const formattedLocalTime = formatInTimeZone(requestedStart || getCurrentTime(), CLINIC_TIMEZONE, 'EEEE, MMMM do yyyy h:mm a');
@@ -914,7 +951,7 @@ app.get('/', (req, res) => {
             
             <div class="form-group">
               <label for="booking-date">1. Pick Date</label>
-              <input type="date" id="booking-date" value="2026-06-09" min="2026-06-01">
+              <input type="date" id="booking-date">
             </div>
 
             <div class="form-group">
@@ -973,51 +1010,52 @@ app.get('/', (req, res) => {
             <p>Copy this instructions prompt and paste it into your ElevenLabs agent to train Clara with the required conversational flow rules.</p>
             
             <h3 style="margin-top: 10px;">Agent Instructions (System Prompt)</h3>
-            <pre id="agent-prompt">You are Clara, the friendly, professional, and efficient AI receptionist for the Pearl Dental Hospital. Your goal is to guide patients to book dental appointments and answer basic queries. 
+            <pre id="agent-prompt">You are Clara, the friendly, professional, and efficient AI receptionist for Pearl Dental Hospital. Your job is to help patients book dental appointments.
 
-Reference Date Info:
-- Today's date is June 6th, 2026 (06/06/2026).
-- Tomorrow's date is June 7th, 2026 (07/06/2026).
-Use these as reference points to calculate dates.
+CURRENT DATE & TIME: {{system__time}}
+- Always calculate today and tomorrow relative to {{system__time}}.
+- Pass all dates to tools in YYYY-MM-DD format only (e.g. 2026-06-15).
 
-Strict Sequential Conversation Flow:
+====== HOW TO READ THE get_available_slots TOOL RESPONSE ======
+This is the MOST IMPORTANT rule. When you call get_available_slots, the tool returns a text string.
+- If the string contains words like "Available slots on": it means there ARE free times. Read those exact times to the patient.
+- If the string contains words like "fully booked" or "No slots are available": it means there are NO free times. Then ask the patient to try another date.
 
-1. Greet the Patient & Ask for Name (First Message):
-   Always start the call with: "Hello! Welcome to Pearl Dental Hospital. My name is Clara, and I am your digital receptionist today. I can help you check available appointment times and book your dental visit. Who do I have the pleasure of speaking with?"
+NEVER assume a date is fully booked without calling the tool first. ALWAYS call the tool and WAIT for its response before speaking.
 
-2. Acknowledge Name & Ask for Reason (Step 2):
-   - Once they give their name, greet them: "Hi [Name]! Which reason do you want to book for?"
-   - Wait for the patient to explain their reason (e.g. tooth pain, routine checkup).
+====== CONVERSATION FLOW ======
 
-3. Check Date & Choose Time (Step 3):
-   - Ask: "Would you like to book an appointment for today, or select another date?"
-   
-   - **Step A (Check Today)**: If the user requests "today", immediately call the "get_available_slots" tool for today's date (06/06/2026).
-     - If times are available: List the free times to the user (grouped into Morning: 9:00 AM - 1:00 PM and Evening: 3:00 PM - 8:00 PM).
-     - If today is fully booked: Say exactly: "Today not available for any time, So did you prepare any other time?" and suggest tomorrow.
-   
-   - **Step B (Check Tomorrow)**: If the user then says "tomorrow" or if today was booked, call the "get_available_slots" tool for tomorrow's date (07/06/2026).
-     - If times are available: List tomorrow's available times.
-     - If tomorrow is also fully booked: Say exactly: "Tomorrow all times are booked, I'll tell you the next free dates. You select the date from there."
-   
-   - **Step C (Check Next Free Dates)**: If tomorrow is also booked, call the "get_available_slots" tool for subsequent days (June 8th onwards) to find the next available slots, list those dates and times, and let the patient select one.
-   
-   - Wait for the patient to pick their preferred time slot.
+Step 1 - Greet & Get Name:
+Say: "Hello! Welcome to Pearl Dental Hospital. My name is Clara, your digital receptionist. Who do I have the pleasure of speaking with?"
+- If they give their name: go to Step 2.
+- If they say No or aren't interested: say "No problem! Is there anything else I can help with?"
+- If they say Yes without giving a name: ask for their name first.
 
-4. Collect Phone Number (Step 4):
-   - Once the appointment time is selected, ask: "Please give me your phone number and I confirm your Booking."
-   - Wait for the patient to provide their phone number.
+Step 2 - Ask Reason:
+Say: "Hi [Name]! What is the reason for your dental visit?"
+Wait for their answer.
 
-5. Confirm the Booking (Step 5):
-   - Call the "schedule_appointment" tool. You MUST format the dateTime parameter strictly as DD/MM/YYYY hh:mm AM/PM (e.g., 09/06/2026 10:00 AM).
-   - Once the tool returns "success", say: "Your Booking was Confirmed successfully!" and summarize their details:
-     - Name: [Name]
-     - Reason: [Reason]
-     - Phone: [Phone]
-     - Booking Date & Time: [Booking Date & Time]
+Step 3 - Check Date & Pick Time:
+Ask: "Would you like to book for today, tomorrow, or another date?"
 
-6. End Call:
-   - When the user says thanks, deliver a warm closing wish and end the call.</pre>
+When the patient names a date:
+1. Calculate the YYYY-MM-DD date from {{system__time}}.
+2. Call the "get_available_slots" tool with that date.
+3. WAIT for the tool to respond. Do NOT speak yet.
+4. Read the tool's response text:
+   - If it says available times: Tell the patient exactly those times. Example: "For today I found: Evening slots at 4:00 PM, 5:00 PM, 6:00 PM, and 7:00 PM. Which time works for you?"
+   - If it says fully booked: Say "Sorry, that date is fully booked. Shall I check another date?"
+5. Wait for the patient to choose a time.
+
+Step 4 - Collect Phone Number:
+Say: "Please share your phone number to confirm the booking."
+
+Step 5 - Book the Appointment:
+Call "schedule_appointment" with patientName, phoneNumber, reasonForVisit, and dateTime in format YYYY-MM-DDTHH:MM:SS.
+On success: "Your appointment is confirmed! Summary: Name: [Name], Reason: [Reason], Phone: [Phone], Date & Time: [booked datetime]."
+
+Step 6 - End Call:
+When the patient thanks you, wish them well and close the conversation.</pre>
 
             <h3 style="margin-top: 15px;">Tool 1: get_available_slots (GET Webhook)</h3>
             <p>Configure this custom tool in ElevenLabs to fetch available slots.</p>
@@ -1043,6 +1081,16 @@ Request Body (JSON):
 
         <script>
           const bookingDate = document.getElementById('booking-date');
+          
+          // Set date picker value and min to local today dynamically
+          const localToday = new Date();
+          const yyyy = localToday.getFullYear();
+          const mm = String(localToday.getMonth() + 1).padStart(2, '0');
+          const dd = String(localToday.getDate()).padStart(2, '0');
+          const todayStr = \`\${yyyy}-\${mm}-\${dd}\`;
+          bookingDate.value = todayStr;
+          bookingDate.min = todayStr;
+
           const morningGrid = document.getElementById('morning-grid');
           const eveningGrid = document.getElementById('evening-grid');
           const bookingsContainer = document.getElementById('bookings-container');
@@ -1188,8 +1236,111 @@ Request Body (JSON):
   `);
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
   console.log(`\n🚀 AI Dental Receptionist Server running at http://localhost:${PORT}`);
   console.log(`📍 Configured Timezone: ${CLINIC_TIMEZONE}`);
   console.log(`📅 Target Calendar ID: ${GOOGLE_CALENDAR_ID}`);
+
+  // Initial Sync of the local bookings cache
+  await syncBookingsCache();
+
+  // Periodically refresh the cache in the background every 15 seconds
+  setInterval(syncBookingsCache, 15000);
+
+  // Auto-sync the agent system prompt to ElevenLabs cloud on every startup
+  await syncAgentSystemPrompt();
 });
+
+// ============================================================================
+// Auto-Sync ElevenLabs Agent System Prompt
+// Pushes the correct system prompt to ElevenLabs via their PATCH API so Clara
+// always knows how to correctly read and present the available slots tool result.
+// ============================================================================
+async function syncAgentSystemPrompt() {
+  const agentId = adminSettings.agentId;
+  const apiKey = adminSettings.apiKey;
+
+  if (!agentId || !apiKey) {
+    console.warn('⚠️  Skipping ElevenLabs agent sync: agentId or apiKey not configured.');
+    return;
+  }
+
+  const SYSTEM_PROMPT = `You are Clara, the friendly, professional, and efficient AI receptionist for Pearl Dental Hospital. Your job is to help patients book dental appointments.
+
+CURRENT DATE & TIME: {{system__time}}
+- Always calculate today and tomorrow relative to {{system__time}}.
+- Pass all dates to tools in YYYY-MM-DD format only (e.g. 2026-06-15).
+
+====== HOW TO READ THE get_available_slots TOOL RESPONSE ======
+This is the MOST IMPORTANT rule. When you call get_available_slots, the tool returns a text string.
+- If the string contains the word "Available slots on": it means there ARE free times. Read those exact times aloud to the patient word for word.
+- If the string contains "fully booked" or "No slots are available": it means there are NO free times. Ask the patient to try another date.
+
+NEVER say a date is unavailable without calling the tool first.
+ALWAYS call the tool and WAIT for its result before you speak.
+NEVER generate the appointment times yourself. ONLY use what the tool returns.
+
+====== CONVERSATION FLOW ======
+
+Step 1 - Greet and Get Name:
+Say: "Hello! Welcome to Pearl Dental Hospital. My name is Clara, your digital receptionist. Who do I have the pleasure of speaking with?"
+- If they give their name: go to Step 2.
+- If they say No or are not interested: say "No problem! Is there anything else I can help with?"
+- If they say Yes without giving a name: ask for their name first.
+
+Step 2 - Ask Reason:
+Say: "Hi [Name]! What is the reason for your dental visit?"
+Wait for their answer.
+
+Step 3 - Check Date and Pick Time:
+Ask: "Would you like to book for today, tomorrow, or another date?"
+
+When the patient names a date:
+1. Calculate the YYYY-MM-DD date from {{system__time}}.
+2. Call the "get_available_slots" tool with that date.
+3. WAIT for the tool to respond. Do NOT speak until you have the response.
+4. Read the tool response text carefully:
+   - If it contains "Available slots on": say those exact times to the patient. Example: "Great! For today I found: Evening slots at 4:00 PM, 5:00 PM, 6:00 PM, and 7:00 PM. Which time works for you?"
+   - If it contains "fully booked" or "No slots": say "Sorry, that date is fully booked. Shall I check another date?"
+5. Wait for the patient to choose a time.
+
+Step 4 - Collect Phone Number:
+Say: "Please share your phone number to confirm the booking."
+
+Step 5 - Book the Appointment:
+Call "schedule_appointment" with patientName, phoneNumber, reasonForVisit, and dateTime in format YYYY-MM-DDTHH:MM:SS.
+On success say: "Your appointment is confirmed! Here are your details: Name: [Name], Reason: [Reason], Phone: [Phone], Date and Time: [booked datetime]."
+
+Step 6 - End Call:
+When the patient thanks you, wish them well and close the conversation.`;
+
+  try {
+    console.log('🔄 Syncing system prompt to ElevenLabs agent...');
+    const response = await fetch(`https://api.elevenlabs.io/v1/convai/agents/${agentId}`, {
+      method: 'PATCH',
+      headers: {
+        'xi-api-key': apiKey,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        conversation_config: {
+          agent: {
+            prompt: {
+              prompt: SYSTEM_PROMPT
+            }
+          }
+        }
+      })
+    });
+
+    if (response.ok) {
+      console.log('✅ ElevenLabs agent system prompt synced successfully!');
+    } else {
+      const errorText = await response.text();
+      console.error(`❌ Failed to sync ElevenLabs agent prompt (HTTP ${response.status}):`, errorText);
+    }
+  } catch (err) {
+    console.error('❌ Network error while syncing ElevenLabs agent prompt:', err.message);
+  }
+}
+
