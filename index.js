@@ -60,19 +60,21 @@ if (process.env.MOCK_MODE === 'true') {
       scopes: ['https://www.googleapis.com/auth/calendar'],
     });
     calendar = google.calendar({ version: 'v3', auth });
-    console.log('✅ Google Calendar client initialized successfully from GOOGLE_CREDENTIALS_JSON env variable.');
+    console.log(`✅ Google Calendar client initialized successfully from GOOGLE_CREDENTIALS_JSON using Service Account: ${credentials.client_email}`);
   } catch (error) {
     console.error('❌ Failed to initialize Google Calendar client from GOOGLE_CREDENTIALS_JSON. Defaulting to Simulation Mode.', error);
     isMockMode = true;
   }
 } else if (fs.existsSync(credentialsPath)) {
   try {
+    const raw = fs.readFileSync(credentialsPath, 'utf8');
+    const credentials = JSON.parse(raw);
     const auth = new google.auth.GoogleAuth({
       keyFile: credentialsPath,
       scopes: ['https://www.googleapis.com/auth/calendar'],
     });
     calendar = google.calendar({ version: 'v3', auth });
-    console.log('✅ Google Calendar client initialized successfully.');
+    console.log(`✅ Google Calendar client initialized successfully using Service Account: ${credentials.client_email}`);
   } catch (error) {
     console.error('❌ Failed to initialize Google Calendar client. Defaulting to Simulation Mode.', error);
     isMockMode = true;
