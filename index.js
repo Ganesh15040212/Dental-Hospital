@@ -518,6 +518,13 @@ app.post('/api/signed-url', async (req, res) => {
 });
 
 /**
+ * Health check endpoint (used by keep-alive ping to prevent Render from sleeping)
+ */
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+/**
  * Endpoint to fetch all active bookings
  */
 app.get('/api/bookings', async (req, res) => {
@@ -1251,6 +1258,23 @@ app.listen(PORT, async () => {
 
   // Auto-sync the agent system prompt to ElevenLabs cloud on every startup
   await syncAgentSystemPrompt();
+
+  // ── Keep-Alive Ping (prevents Render free tier from sleeping) ────────────
+  // Render free instances sleep after ~15 min of inactivity.
+  // When Clara calls a tool and the server is waking up, the fetch times out
+  // and Clara says "issue scheduling". This self-ping prevents that sleep.
+  const RENDER_URL = process.env.RENDER_EXTERNAL_URL;
+  if (RENDER_URL) {
+    setInterval(async () => {
+      try {
+        await fetch(`${RENDER_URL}/api/health`);
+        console.log('🏓 [Keep-Alive] Ping sent to prevent sleep.');
+      } catch (err) {
+        console.warn('⚠️ [Keep-Alive] Ping failed:', err.message);
+      }
+    }, 10 * 60 * 1000); // every 10 minutes
+    console.log(`🏓 [Keep-Alive] Self-ping enabled for: ${RENDER_URL}`);
+  }
 });
 
 // ============================================================================
