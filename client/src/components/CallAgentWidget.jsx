@@ -53,10 +53,20 @@ export default function CallAgentWidget({ isOpen, setIsOpen, mode, setMode }) {
       });
       const data = await res.json();
       console.log('[CLIENT TOOL] schedule_appointment API response:', JSON.stringify(data));
-      return data;
+
+      // ⚠️ CRITICAL: ElevenLabs client tools MUST return a plain STRING.
+      // Returning a JSON object causes Clara to treat it as a timeout/failure
+      // even when the booking succeeds. Always return the message string.
+      if (data.status === 'success') {
+        return data.message || 'Your appointment has been successfully booked! We look forward to seeing you.';
+      } else if (data.status === 'rejected') {
+        return data.message || 'Sorry, that slot is not available. Please choose a different time.';
+      } else {
+        return data.message || 'There was an issue booking your appointment. Please try again.';
+      }
     } catch (err) {
       console.error('[CLIENT TOOL] schedule_appointment fetch failed:', err);
-      return { status: 'error', message: 'Failed to book appointment.' };
+      return 'Failed to connect to the booking system. Please try again.';
     }
   });
   // ─────────────────────────────────────────────────────────────────────────
