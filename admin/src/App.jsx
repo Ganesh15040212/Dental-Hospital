@@ -22,7 +22,7 @@ export default function App() {
   const [bookings, setBookings] = useState([]);
   const [loadingBookings, setLoadingBookings] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeTab, setActiveTab] = useState('past'); // 'past' or 'upcoming'
+  const [activeTab, setActiveTab] = useState('upcoming'); // 'past' or 'upcoming'
 
   // Authentication state
   const [isLoggedIn, setIsLoggedIn] = useState(localStorage.getItem('adminLoggedIn') === 'true');
