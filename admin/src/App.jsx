@@ -22,7 +22,7 @@ export default function App() {
   const [bookings, setBookings] = useState([]);
   const [loadingBookings, setLoadingBookings] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
-  const [activeTab, setActiveTab] = useState('upcoming'); // 'upcoming' or 'past'
+  const [activeTab, setActiveTab] = useState('past'); // 'past' or 'upcoming'
 
   // Authentication state
   const [isLoggedIn, setIsLoggedIn] = useState(localStorage.getItem('adminLoggedIn') === 'true');
@@ -270,21 +270,20 @@ export default function App() {
             </button>
           </div>
 
-          {/* Toggle switcher tabs (Passed Data vs Upcoming) */}
           <div className="schedule-toggle">
-            <button 
-              onClick={() => setActiveTab('upcoming')}
-              className={`schedule-toggle-btn ${activeTab === 'upcoming' ? 'active' : ''}`}
-            >
-              <Calendar size={14} />
-              <span>Upcoming Schedule ({upcomingBookings.length})</span>
-            </button>
             <button 
               onClick={() => setActiveTab('past')}
               className={`schedule-toggle-btn ${activeTab === 'past' ? 'active' : ''}`}
             >
               <History size={14} />
               <span>Passed Data ({pastBookings.length})</span>
+            </button>
+            <button 
+              onClick={() => setActiveTab('upcoming')}
+              className={`schedule-toggle-btn ${activeTab === 'upcoming' ? 'active' : ''}`}
+            >
+              <Calendar size={14} />
+              <span>Upcoming Schedule ({upcomingBookings.length})</span>
             </button>
           </div>
 
