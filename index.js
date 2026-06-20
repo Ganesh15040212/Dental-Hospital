@@ -119,9 +119,9 @@ async function syncBookingsCache() {
   }
   try {
     const now = getCurrentTime();
-    const dayStart = new Date(now);
-    dayStart.setHours(0, 0, 0, 0);
-    const dayEnd = new Date(dayStart.getTime() + 30 * 24 * 60 * 60 * 1000); // 30 days in future
+    // Search from 30 days in the past to 30 days in the future
+    const dayStart = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+    const dayEnd = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
 
     const response = await calendar.events.list({
       calendarId: GOOGLE_CALENDAR_ID,
@@ -140,7 +140,7 @@ async function syncBookingsCache() {
       description: e.description || '',
       transparency: e.transparency || 'opaque'
     }));
-    console.log(`✅ [CACHE] Synced ${bookingsCache.length} bookings from Google Calendar.`);
+    console.log(`✅ [CACHE] Synced ${bookingsCache.length} bookings (past & future) from Google Calendar.`);
   } catch (error) {
     console.error('❌ [CACHE] Failed to sync bookings cache:', error);
   }
@@ -524,14 +524,9 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-/**
- * Endpoint to fetch all active bookings
- */
 app.get('/api/bookings', async (req, res) => {
-  const now = getCurrentTime();
-  const sorted = bookingsCache
-    .filter(b => new Date(b.end) > now)
-    .sort((a, b) => new Date(a.start) - new Date(b.start));
+  // Return all bookings (both past and future) sorted by start date
+  const sorted = [...bookingsCache].sort((a, b) => new Date(a.start) - new Date(b.start));
   return res.json({ status: 'success', bookings: sorted });
 });
 

@@ -12,7 +12,8 @@ import {
   Mail,
   LogOut,
   Lock,
-  AlertCircle
+  AlertCircle,
+  History
 } from 'lucide-react';
 import { format, parseISO, isToday, isTomorrow } from 'date-fns';
 
@@ -21,6 +22,7 @@ export default function App() {
   const [bookings, setBookings] = useState([]);
   const [loadingBookings, setLoadingBookings] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
+  const [activeTab, setActiveTab] = useState('upcoming'); // 'upcoming' or 'past'
 
   // Authentication state
   const [isLoggedIn, setIsLoggedIn] = useState(localStorage.getItem('adminLoggedIn') === 'true');
@@ -119,8 +121,8 @@ export default function App() {
     return null;
   };
 
-  // Filter Bookings list
-  const filteredBookings = bookings.filter(booking => {
+  // Filter and Partition Bookings
+  const filtered = bookings.filter(booking => {
     const summaryText = booking.summary || '';
     const name = summaryText.replace('Appointment:', '').replace('Dental appointment:', '').trim().toLowerCase();
     const { phone, reason } = parseDescription(booking.description);
@@ -130,6 +132,17 @@ export default function App() {
       reason.toLowerCase().includes(searchTerm.toLowerCase())
     );
   });
+
+  const now = new Date();
+  const upcomingBookings = filtered
+    .filter(b => new Date(b.end) > now)
+    .sort((a, b) => new Date(a.start) - new Date(b.start)); // Ascending: next appointments first
+
+  const pastBookings = filtered
+    .filter(b => new Date(b.end) <= now)
+    .sort((a, b) => new Date(b.start) - new Date(a.start)); // Descending: most recent past first
+
+  const activeBookingsList = activeTab === 'upcoming' ? upcomingBookings : pastBookings;
 
   if (!isLoggedIn) {
     return (
@@ -240,8 +253,12 @@ export default function App() {
         <div className="panel animate-fade-in">
           <div className="panel-header">
             <div>
-              <h2>Upcoming Patient Schedule</h2>
-              <p>Real-time view of dental appointments synced from Google Calendar / Database.</p>
+              <h2>{activeTab === 'upcoming' ? 'Upcoming Patient Schedule' : 'Passed Appointments Archive'}</h2>
+              <p>
+                {activeTab === 'upcoming' 
+                  ? 'Real-time view of future dental appointments synced from Google Calendar.' 
+                  : 'Historical list of completed or passed dental appointments.'}
+              </p>
             </div>
             <button 
               onClick={fetchBookings} 
@@ -253,14 +270,32 @@ export default function App() {
             </button>
           </div>
 
+          {/* Toggle switcher tabs (Passed Data vs Upcoming) */}
+          <div className="schedule-toggle">
+            <button 
+              onClick={() => setActiveTab('upcoming')}
+              className={`schedule-toggle-btn ${activeTab === 'upcoming' ? 'active' : ''}`}
+            >
+              <Calendar size={14} />
+              <span>Upcoming Schedule ({upcomingBookings.length})</span>
+            </button>
+            <button 
+              onClick={() => setActiveTab('past')}
+              className={`schedule-toggle-btn ${activeTab === 'past' ? 'active' : ''}`}
+            >
+              <History size={14} />
+              <span>Passed Data ({pastBookings.length})</span>
+            </button>
+          </div>
+
           {/* Filter Input */}
-          <div className="search-container">
+          <div className="search-container" style={{ marginTop: '1.25rem' }}>
             <span className="search-icon-wrapper">
               <Search size={15} />
             </span>
             <input 
               type="text" 
-              placeholder="Search by patient name, phone number, or visit reason..."
+              placeholder={activeTab === 'upcoming' ? "Search upcoming schedule by name, phone, or reason..." : "Search passed data archive..."}
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="search-input"
@@ -274,9 +309,13 @@ export default function App() {
                 <RefreshCw size={24} className="active" style={{ animation: 'spin 1s linear infinite', marginBottom: '0.75rem' }} />
                 <p>Loading schedule feed...</p>
               </div>
-            ) : filteredBookings.length === 0 ? (
+            ) : activeBookingsList.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '4rem 0', border: '2px dashed var(--panel-border)', borderRadius: '18px', background: 'var(--bg-primary)' }}>
-                <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem' }}>No upcoming dental appointments found.</p>
+                <p style={{ color: 'var(--text-muted)', fontSize: '0.95rem' }}>
+                  {activeTab === 'upcoming' 
+                    ? 'No upcoming dental appointments found.' 
+                    : 'No past dental appointments found in the archive.'}
+                </p>
                 {searchTerm && (
                   <button 
                     onClick={() => setSearchTerm('')} 
@@ -289,7 +328,7 @@ export default function App() {
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                {filteredBookings.map((booking) => {
+                {activeBookingsList.map((booking) => {
                   const startDateObj = parseISO(booking.start);
                   const { phone, reason } = parseDescription(booking.description);
                   const summaryText = booking.summary || '';

@@ -233,6 +233,44 @@ body {
   to { transform: rotate(360deg); }
 }
 
+/* Schedule Tab Switcher Toggle */
+.schedule-toggle {
+  display: flex;
+  background: var(--bg-primary);
+  border: 1px solid var(--panel-border);
+  padding: 0.25rem;
+  border-radius: 14px;
+  gap: 0.25rem;
+  margin-top: 1rem;
+  width: fit-content;
+}
+
+.schedule-toggle-btn {
+  background: transparent;
+  border: none;
+  padding: 0.55rem 1.25rem;
+  border-radius: 10px;
+  font-family: var(--font-body);
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.schedule-toggle-btn:hover {
+  color: var(--text-primary);
+}
+
+.schedule-toggle-btn.active {
+  background: #ffffff;
+  color: var(--accent-violet);
+  box-shadow: 0 4px 12px -2px rgba(99, 102, 241, 0.08), 0 2px 4px -1px rgba(99, 102, 241, 0.04);
+}
+
 /* Inputs & Form Groups */
 .form-group {
   display: flex;
